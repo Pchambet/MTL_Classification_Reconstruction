@@ -1,35 +1,55 @@
 # MTL — Classification & Reconstruction
 
-**Objective:**
-Train a single CNN to perform **two tasks simultaneously** — **land-use classification** (Forest vs Residential) and **image reconstruction** — to study how **Multi-Task Learning (MTL)** improves generalization and reduces overfitting.
+Train a single CNN to perform **two tasks simultaneously** — land-use classification (Forest vs Residential) and image reconstruction — to study how Multi-Task Learning improves generalization and reduces overfitting compared to single-task baselines.
 
----
+## Why Multi-Task Learning?
 
-## Dataset
+In standard supervised learning, each task trains an independent model. MTL leverages **shared representations** across related tasks: a classification head forces the encoder to learn discriminative features, while a reconstruction head ensures the encoder preserves fine-grained spatial information. The result is a more robust encoder that generalizes better, especially on small datasets.
 
-Dataset: [**EuroSAT RGB**](https://www.kaggle.com/datasets/waseemalastal/eurosat-rgb-dataset)
-Only **Forest** and **Residential** classes are included.
-Download manually and place in:
+## Approach
 
-```
-data/
-├─ Forest/
-└─ Residential/
-```
+| Component | Detail |
+|---|---|
+| **Shared encoder** | Convolutional backbone producing a latent representation |
+| **Classification head** | Fully connected layers → binary output (Forest / Residential) |
+| **Reconstruction head** | Transposed convolutions → pixel-level reconstruction |
+| **Loss** | Weighted sum: `L = α · CrossEntropy + (1-α) · MSE` |
+| **Dataset** | [EuroSAT RGB](https://www.kaggle.com/datasets/waseemalastal/eurosat-rgb-dataset) — Forest & Residential subsets |
 
----
-
-## Experiments
-
-Each member has their own notebook folder for experiments:
+## Project Structure
 
 ```
-notebooks/
-├─ alexi/
-├─ houssem/
-├─ mahouna/
-└─ pierre/
+├── data/               # EuroSAT Forest & Residential images
+│   ├── Forest/
+│   └── Residential/
+├── notebooks/          # Per-member experiment notebooks
+│   ├── alexi/
+│   ├── houssem/
+│   ├── mahouna/
+│   └── pierre/
+├── src/
+│   └── resize.py       # Image preprocessing utilities
+├── LICENSE
+└── README.md
 ```
 
-Use these as playgrounds to test preprocessing, models, or training ideas.
-If needed later, results can be centralized into a main training script.
+## Getting Started
+
+```bash
+git clone https://github.com/Pchambet/MTL_Classification_Reconstruction.git
+cd MTL_Classification_Reconstruction
+```
+
+Download [EuroSAT RGB](https://www.kaggle.com/datasets/waseemalastal/eurosat-rgb-dataset), extract the **Forest** and **Residential** folders into `data/`.
+
+## Tech Stack
+
+Python · PyTorch · NumPy · Matplotlib
+
+## Team
+
+Group project — Télécom SudParis, M2 Data Science.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
