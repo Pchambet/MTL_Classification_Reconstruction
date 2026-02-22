@@ -1,14 +1,43 @@
-# === LATEX ===
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.cursor/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.envrc
+
+# LaTeX
 *.aux
 *.bbl
 *.blg
-*.brf
-*.idx
-*.ilg
-*.ind
-*.lof
 *.log
 *.lot
+*.lof
 *.nav
 *.out
 *.snm
@@ -16,21 +45,4 @@
 *.toc
 *.fls
 *.fdb_latexmk
-*.pdfsync
-*.synctex(busy)
-*.xdv
-*.acn
-*.acr
-*.alg
-*.glg
-*.glo
-*.gls
-*.ist
-*.lof
-*.lol
-*.lot
-*.out.ps
-*.upa
-*.upb
-arborescence.txt
-notebooks/mahouna/MLT_AE_experiments.html
+
