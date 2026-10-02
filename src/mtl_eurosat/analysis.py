@@ -104,6 +104,26 @@ def _get(rows: list[dict], variant: str, seed: int, key: str) -> float:
     return next(r[key] for r in rows if r["variant"] == variant and r["seed"] == seed)
 
 
+def edge_strength(x: np.ndarray) -> float:
+    """Mean absolute grey-level step between horizontal neighbours (0-255 scale).
+
+    A crude texture measure: smooth canopy scores low, roofs and streets score high.
+    """
+    grey = x.astype(float).mean(-1)
+    return float(np.abs(np.diff(grey, axis=2)).mean())
+
+
+def shift_stats(images) -> dict[str, float]:
+    """Edge strength per image group: where AID forests sit between the training classes."""
+    groups = {
+        "eurosat_forest": images.x_id[images.y_id == 0],
+        "eurosat_residential": images.x_id[images.y_id == 1],
+        "aid_forest": images.x_ood[images.group_ood == "Forest"],
+        "aid_residential": images.x_ood[images.y_ood == 1],
+    }
+    return {k: edge_strength(v) for k, v in groups.items()}
+
+
 def notebook_run() -> dict[str, float]:
     """OOD accuracies of the original single-seed notebook run."""
     raw = json.loads(NOTEBOOK.read_text())

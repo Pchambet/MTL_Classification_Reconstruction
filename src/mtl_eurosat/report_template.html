@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reconstruction vs Domain Shift</title>
+<meta name="description" content="Does a reconstruction auxiliary task make a satellite-image classifier robust to a new sensor? A multi-seed study, EuroSAT to AID.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="$plotly"></script>
+<style>
+:root {
+  --bg: #ffffff; --ink: #0f172a; --muted: #64748b; --rule: #e2e8f0; --panel: #f8fafc;
+  --teal: #0d9488; --amber: #d97706; --slate: #64748b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1120; --ink: #e2e8f0; --muted: #94a3b8; --rule: #1e293b; --panel: #111827;
+    --teal: #2dd4bf; --amber: #f59e0b; --slate: #94a3b8;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b1120; --ink: #e2e8f0; --muted: #94a3b8; --rule: #1e293b; --panel: #111827;
+  --teal: #2dd4bf; --amber: #f59e0b; --slate: #94a3b8;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.65 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 860px; margin: 0 auto; padding: 48px 16px 80px; }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+h2 { font-size: 1.3rem; margin: 48px 0 8px; padding-top: 16px; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.05rem; margin: 28px 0 4px; }
+.lede { font-size: 1.1rem; color: var(--muted); margin: 0 0 24px; }
+.meta { font-size: 0.85rem; color: var(--muted); }
+a { color: var(--teal); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 24px 0; }
+.kpi { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; }
+.kpi b { display: block; font-size: 1.5rem; line-height: 1.2; }
+.kpi span { font-size: 0.85rem; color: var(--muted); }
+.chart { width: 100%; height: 420px; margin: 8px 0 4px; }
+.caption { font-size: 0.85rem; color: var(--muted); margin: 0 0 20px; }
+figure { margin: 16px 0 24px; }
+figure img { width: 100%; height: auto; border-radius: 8px; background: #fff; }
+.table { overflow-x: auto; margin: 12px 0 20px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; }
+code { font-size: 0.9em; background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+footer { margin-top: 56px; font-size: 0.85rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<p class="meta">Multi-task learning · domain shift · EuroSAT → AID</p>
+<h1>Does a reconstruction task make a satellite classifier robust to a new sensor?</h1>
+<p class="lede">A course project claimed that training one encoder to classify <em>and</em> reconstruct
+satellite images makes it generalise better. Re-run over $n_seeds seeds and scored on aerial images
+from a different sensor, the claim does not hold: the auxiliary loss leaves out-of-distribution
+accuracy where it was, and single runs were too noisy to say anything at all.</p>
+
+<div class="kpis">
+  <div class="kpi"><b>≥ $val_min</b><span>EuroSAT validation accuracy, every model and seed: the in-distribution task is saturated</span></div>
+  <div class="kpi"><b>$cnn_ood_mean → $hard06_ood_mean</b><span>AID accuracy, single-task CNN → hard-sharing MTL (α = 0.6), mean of $n_seeds seeds</span></div>
+  <div class="kpi"><b>$aux</b><span>effect of the reconstruction loss with the architecture held fixed (paired, 95% CI)</span></div>
+</div>
+
+<h2>The question</h2>
+<p>Train on Sentinel-2 patches of forest and residential land (EuroSAT), deploy on Google Earth aerial
+images of the same two land uses (AID). Classification-only training can latch onto shortcuts of the
+training sensor; a reconstruction head forces the shared encoder to keep the whole image. Does that
+auxiliary task buy robustness to the sensor change? The answer decides whether an auxiliary loss is a
+cheap robustness fix or a distraction from collecting target-domain data.</p>
+
+<h2>Setup</h2>
+<ul>
+<li><b>Train / validate:</b> 6,000 EuroSAT RGB patches (3,000 forest, 3,000 residential, 64×64), stratified 80/20 split drawn per seed.</li>
+<li><b>Out of distribution:</b> 120 AID images resized to 64×64 — 60 forest, 30 dense residential, 30 medium residential. Never used for training or checkpoint selection.</li>
+<li><b>Models</b> (the course notebooks' architectures, unchanged): a 24k-parameter single-task CNN; a 193k-parameter hard-sharing network (shared encoder, classification head, decoder) trained on α·CE + (1 − α)·MSE; a soft-sharing network (two branches tied by an alignment loss, masked-autoencoder reconstruction).</li>
+<li><b>Control:</b> the hard-sharing network with α = 1 — same architecture, reconstruction switched off — separates the effect of the auxiliary loss from the effect of an 8× larger model.</li>
+<li><b>Protocol:</b> 10 epochs of Adam (lr 10⁻³, batch 32), checkpoint with the lowest validation loss, $n_seeds seeds for the headline variants and $n_seeds_sweep for the rest of the α sweep. Differences are paired by seed (same split).</li>
+</ul>
+
+<h2>In distribution everything is perfect; on AID nothing is</h2>
+<div id="seeds" class="chart"></div>
+<p class="caption">One dot per seed. Hover for values. The validation split cannot rank the models; the AID set can, barely.</p>
+$results_table
+<p>With the architecture held fixed, adding the reconstruction loss changes AID accuracy by
+<b>$aux</b> (paired t-test, $aux_p), and AID-forest accuracy by $aux_forest. Against the small
+single-task CNN — the comparison the course project made — hard-sharing MTL differs by
+$mtl_vs_cnn ($mtl_vs_cnn_p); the larger architecture alone accounts for $arch.</p>
+
+<h2>Every error is a forest called residential</h2>
+<figure><img src="figures/per_group.png" alt="Accuracy per AID group and model"></figure>
+<p>All models recognise AID residential scenes. The single-task CNN gets $cnn_forest of AID forests
+right, hard-sharing MTL $hard06_forest. The ranking is better than the accuracy suggests (AUROC
+$cnn_auroc and $hard06_auroc): many forests receive a lower residential score than the residential
+images, but still above the 0.5 threshold — a shift of the decision boundary as much as a failure of the features.</p>
+<figure><img src="figures/scores.png" alt="Predicted probability of residential on AID images"></figure>
+<figure><img src="figures/shift.png" alt="EuroSAT and AID example images"></figure>
+<p class="caption">At 64×64, a Sentinel-2 forest is a smooth green field; a 600×600 Google Earth forest,
+shrunk to the same size, shows crowns, shadows and clearings. Edge strength (mean grey-level step between
+neighbouring pixels): EuroSAT forest $edge_eu_forest, AID forest $edge_aid_forest, EuroSAT residential
+$edge_eu_res, AID residential $edge_aid_res. On this texture measure, an AID forest sits between the two training classes.</p>
+
+<h2>A single run cannot settle it</h2>
+<div id="epochs" class="chart"></div>
+<p class="caption">AID accuracy after every epoch, one line per seed, while EuroSAT validation accuracy sits at ~100%.</p>
+<p>Within one training run, AID accuracy moves by tens of points from one epoch to the next while
+validation accuracy does not move. Across seeds the hard-sharing model ranges $hard06_range on AID and
+the single-task CNN $cnn_range. The original notebook's single-seed numbers — $nb_cnn (CNN), $nb_mtl
+(MTL), $nb_soft (soft sharing) — are draws from these distributions, not a ranking.</p>
+
+<h2>Turning the reconstruction weight up does not help either</h2>
+<div id="alpha" class="chart"></div>
+<p class="caption">Mean and 95% CI across seeds; dashed lines are the single-task CNN.</p>
+<figure><img src="figures/reconstructions.png" alt="Reconstructions of EuroSAT and AID images"></figure>
+
+<h2>Soft sharing: a train/test mismatch, not a property of MTL</h2>
+<p>The soft-sharing network is trained only on images with 30% of their pixels masked. Scored on clean
+EuroSAT validation images it reaches $soft_val (vs $soft_val_masked on masked ones), and on clean AID
+images $soft_ood ($soft_ood_masked when masked). Its collapse in the original notebook
+($nb_soft) came from scoring a masked-input model on unmasked images.</p>
+
+<h2>Limitations</h2>
+<ul>
+<li>The AID set is small: 60 forest images, so one image is 1.7 points of forest accuracy. Confidence intervals are across seeds and do not include the sampling error of the test set itself.</li>
+<li>One architecture family, 10 epochs, no data augmentation, no tuning of α beyond the sweep, the soft-sharing weights as set in the notebook.</li>
+<li>Training ran on an Apple GPU (MPS), which is not bit-for-bit deterministic; re-runs reproduce the distributions, not every digit.</li>
+<li>Untested here and more likely to help: colour/scale augmentation, a handful of labelled AID images, domain adaptation.</li>
+</ul>
+
+<footer>Built by <a href="https://github.com/Pchambet">Pierre Chambet</a> — decision science for operations under uncertainty. Course project with Mahouna Vayssières, Alexi and Houssem (Télécom SudParis). Source and reproduction: <a href="https://github.com/Pchambet/MTL_Classification_Reconstruction">github.com/Pchambet/MTL_Classification_Reconstruction</a>.</footer>
+</main>
+<script>
+(function () {
+  const css = getComputedStyle(document.documentElement);
+  const v = (name) => css.getPropertyValue(name).trim();
+  const swap = { "#0d9488": v("--teal"), "#d97706": v("--amber"), "#64748b": v("--slate") };
+  const recolour = (traces) => traces.map((t) => {
+    if (t.line && t.line.color) t.line.color = swap[t.line.color] || t.line.color;
+    if (t.marker && t.marker.color) t.marker.color = swap[t.marker.color] || t.marker.color;
+    if (t.error_y) t.error_y.color = t.line ? t.line.color : v("--ink");
+    return t;
+  });
+  const axis = (extra) => Object.assign({ gridcolor: v("--rule"), linecolor: v("--rule"), zeroline: false, fixedrange: true }, extra);
+  const layout = (extra) => Object.assign({
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: "Inter, system-ui, sans-serif", color: v("--ink"), size: 12 },
+    margin: { l: 56, r: 16, t: 16, b: 56 },
+    legend: { orientation: "h", y: -0.2, font: { size: 11 } },
+    xaxis: axis({}),
+    yaxis: axis({ tickformat: ".0%" }),
+    hoverlabel: { font: { family: "Inter, system-ui, sans-serif" } },
+  }, extra);
+  const config = { displayModeBar: false, responsive: true };
+  Plotly.newPlot("seeds", recolour($seeds), layout({ boxmode: "group",
+    yaxis: axis({ tickformat: ".0%", range: [0.4, 1.03], title: { text: "accuracy" } }) }), config);
+  Plotly.newPlot("epochs", recolour($epochs), layout({
+    xaxis: axis({ title: { text: "epoch" }, dtick: 1 }),
+    yaxis: axis({ tickformat: ".0%", title: { text: "AID accuracy" } }) }), config);
+  Plotly.newPlot("alpha", recolour($alpha), layout({
+    xaxis: axis({ title: { text: "α (weight on classification)" }, autorange: "reversed" }),
+    yaxis: axis({ tickformat: ".0%", title: { text: "AID accuracy" } }) }), config);
+})();
+</script>
+</body>
+</html>
