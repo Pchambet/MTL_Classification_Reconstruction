@@ -27,3 +27,6 @@ Thumbs.db
 # Environment
 .env
 .envrc
+
+# Report assets are copied from docs/figures/ at build and deploy time
+site/figures/

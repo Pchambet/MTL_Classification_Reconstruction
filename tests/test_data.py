@@ -22,7 +22,12 @@ def test_read_all_labels_and_resizes(tmp_path):
     assert images.y_id.tolist() == [0, 0, 0, 1, 1]
     assert images.x_ood.shape == (4, 64, 64, 3)
     assert images.y_ood.tolist() == [0, 0, 1, 1]
-    assert images.group_ood.tolist() == ["Forest", "Forest", "DenseResidential", "MediumResidential"]
+    assert images.group_ood.tolist() == [
+        "Forest",
+        "Forest",
+        "DenseResidential",
+        "MediumResidential",
+    ]
 
 
 def test_cache_round_trip(tmp_path):
@@ -49,7 +54,7 @@ def test_stratified_split_is_balanced_disjoint_and_seeded():
     tr, va = data.stratified_split(y, 0.2, seed=3)
     assert len(va) == 120 and np.bincount(y[va]).tolist() == [60, 60]
     assert set(tr).isdisjoint(va) and len(tr) + len(va) == len(y)
-    tr2, va2 = data.stratified_split(y, 0.2, seed=3)
+    _, va2 = data.stratified_split(y, 0.2, seed=3)
     np.testing.assert_array_equal(va, va2)
     assert not np.array_equal(va, data.stratified_split(y, 0.2, seed=4)[1])
 
