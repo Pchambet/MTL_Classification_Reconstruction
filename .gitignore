@@ -1,48 +1,29 @@
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
 *.egg-info/
-*.egg
 dist/
 build/
-
-# Virtual environments
 .venv/
-venv/
-env/
+.ruff_cache/
+.pytest_cache/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# IDE
+# Data caches and model weights (the images themselves are committed)
+data/raw/
+data/interim/
+*.pt
+
+# IDE / OS
 .vscode/
 .cursor/
 .idea/
 *.swp
-
-# OS
 .DS_Store
 Thumbs.db
 
 # Environment
 .env
 .envrc
-
-# LaTeX
-*.aux
-*.bbl
-*.blg
-*.log
-*.lot
-*.lof
-*.nav
-*.out
-*.snm
-*.synctex.gz
-*.toc
-*.fls
-*.fdb_latexmk
-

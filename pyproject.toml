@@ -1,0 +1,54 @@
+[project]
+name = "mtl-eurosat"
+version = "1.0.0"
+description = "Does a reconstruction auxiliary task make a satellite-image classifier more robust to domain shift? A multi-seed study on EuroSAT -> AID."
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Pierre Chambet", email = "pierrechambet@gmail.com" }]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.3",
+    "pillow>=12.3.0",
+    "scipy>=1.18.1",
+    "torch>=2.14.1",
+]
+
+[project.scripts]
+mtl-eurosat = "mtl_eurosat.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+notebooks = [
+    "ipykernel>=7.4.0",
+    "seaborn>=0.13.2",
+    "torchvision>=0.29.1",
+]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+extend-select = ["I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
