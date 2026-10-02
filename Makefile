@@ -6,7 +6,7 @@ setup:  ## install the locked environment
 data:  ## decode the committed images once into data/interim/
 	uv run mtl-eurosat data
 
-run:  ## multi-seed grid -> results/ (about 2.5 h on an Apple M-series GPU, resumable)
+run:  ## multi-seed grid -> results/ (about 4 h on an Apple M-series GPU, resumable)
 	uv run mtl-eurosat run
 
 report:  ## figures -> docs/figures/, HTML report -> site/index.html

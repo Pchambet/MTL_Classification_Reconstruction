@@ -1,241 +1,124 @@
-# Multi-Task Learning: When One Model Does the Work of Two
+# MTL_Classification_Reconstruction
 
-**A single neural network learns to classify satellite images and reconstruct them — and in doing so, becomes better at both.**
+Does adding a reconstruction task make a satellite-image classifier robust to a new sensor? Over 10 seeds and an out-of-distribution test set, no: multi-task learning lands where a single-task CNN already was, and the gains that do appear follow the input masking, not the reconstruction.
 
----
+[![ci](https://github.com/Pchambet/MTL_Classification_Reconstruction/actions/workflows/ci.yml/badge.svg)](https://github.com/Pchambet/MTL_Classification_Reconstruction/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-0d9488)
+[![License: MIT](https://img.shields.io/badge/license-MIT-64748b)](LICENSE)
+[![Report](https://img.shields.io/badge/report-interactive-d97706)](https://pchambet.github.io/MTL_Classification_Reconstruction/)
 
-*If you've ever wondered why the human brain can learn to recognize faces, drive a car, and play the piano with the same neural hardware — while a machine typically needs a separate model for each task — this project is for you. We explore **Multi-Task Learning (MTL)**: the idea that learning several related tasks at once can yield a more robust, more generalizable model than training each task in isolation. No magic, no hand-waving — just a carefully designed experiment on real satellite imagery, with results you can run yourself.*
+![EuroSAT validation and AID accuracy of every model, one dot per seed](docs/figures/hero.png)
 
----
+## TL;DR
 
-## The central question
+- **The in-distribution task is saturated.** Scored on the inputs it was trained on, every model reaches ≥ 99.0% on EuroSAT validation, on every seed. Validation accuracy cannot tell the models apart.
+- **On AID aerial images, hard-sharing MTL does not beat the single-task CNN:** 70.0% vs 69.3% accuracy, a paired difference of **+0.7 pp (95% CI −2.9 to +4.2, p = 0.68)**. It ranks worse: AUROC −0.053 (CI −0.086 to −0.020).
+- **The reconstruction loss only offsets the larger model.** With the architecture held fixed, it adds +3.8 pp (CI +0.7 to +6.9), but the 8× larger architecture on its own loses 3.2 pp (CI −5.8 to −0.5) against the small CNN.
+- **Masking alone matches soft sharing's 73.3%.** A single-task CNN trained on the same 30%-masked inputs reaches 71.9%, and soft sharing adds +1.4 pp (CI −2.3 to +5.2). Trained on masked inputs and scored on clean ones, that CNN gets 74.3% on AID, the best accuracy measured.
+- **The original single-seed comparison was noise.** The course notebook ranked CNN 73.3% > MTL 58.3% > soft sharing 50.8%. Across seeds, the CNN spans 65–73% and MTL 63–78%. Within a typical run, AID accuracy moves 15–16 points between epochs 3 and 10.
 
-We ask a simple question:
+## Why it matters
 
-> **Can forcing a network to solve two problems at once — classification and reconstruction — make it better at the first one?**
+A reconstruction head is often presented as a free regulariser: keep the whole image in the shared encoder and the classifier should rely less on sensor-specific shortcuts. That claim decides whether to spend effort on a decoder and a loss weight α, or on augmentation and a few labelled images from the target domain. On this shift (Sentinel-2 to Google Earth imagery), the decoder did not pay for itself. A cheap input-masking augmentation did at least as well. A single training run could not have shown either result.
 
-Not "better" in the sense of a few extra percentage points on a benchmark. Better in the sense of *understanding more*, *overfitting less*, and *generalizing* to images it has never seen. The answer, as you'll see, is nuanced — and the nuance is exactly where the learning happens.
+## Approach
 
----
+1. **Data.** We train on 6,000 EuroSAT RGB patches (Sentinel-2, 64×64): 3,000 forest and 3,000 residential, with a stratified 80/20 split drawn per seed. We test out of distribution on 120 [AID](https://captain-whu.github.io/AID/) Google Earth images resized to 64×64: 60 forest, 30 dense residential and 30 medium residential. AID is never used for training or checkpoint selection.
+2. **Models.** The three architectures come from the course notebooks:
+   - a 24k-parameter single-task CNN;
+   - a 193k-parameter hard-sharing network (shared encoder, classifier, decoder) trained on α·CE + (1 − α)·MSE;
+   - a 360k-parameter soft-sharing network (two branches tied by an alignment loss, masked-autoencoder reconstruction on inputs with 30% of pixels zeroed).
+3. **Controls.** Two controls isolate the effect of reconstruction:
+   - hard sharing with **α = 1** (same architecture, decoder unused) separates the auxiliary loss from the larger model;
+   - a **single-task CNN trained on the same masked inputs** separates soft sharing from its masking.
+4. **Protocol.** Each model trains for 10 epochs of Adam (lr 10⁻³, batch 32). We keep the checkpoint with the lowest validation loss. The headline variants run on 10 seeds and the rest of the α sweep (0.8, 0.4, 0.2) on 5, for 65 runs in total. Each seed fixes the split, the initialisation and the masks. Differences are paired by seed and reported with a t interval.
+5. **Report.** Every number in this README and in the [report](https://pchambet.github.io/MTL_Classification_Reconstruction/) is computed from `results/` (`results/summary.json`, `results/facts.json`).
 
-## Part 1 — The intuition: why two tasks might beat one
+## Results
 
-### The problem with single-task learning
+| model (inputs it is scored on) | parameters | EuroSAT val acc | AID acc [95% CI] | AID AUROC | AID forest acc |
+|---|---:|---:|---:|---:|---:|
+| Single-task CNN | 23,714 | 99.96% | 69.3% [67.5, 71.1] | 0.823 | 39.7% |
+| Hard sharing, α = 1 (no reconstruction) | 193,221 | 100.00% | 66.2% [63.2, 69.1] | 0.757 | 49.8% |
+| Hard sharing, α = 0.6 | 193,221 | 99.99% | 70.0% [67.1, 72.9] | 0.770 | 54.7% |
+| Soft sharing (masked, as trained) | 359,813 | 99.83% | 73.3% [69.5, 77.1] | 0.890 | 48.7% |
+| Single-task CNN, masked inputs (masked) | 23,714 | 99.46% | 71.9% [70.7, 73.2] | 0.813 | 47.5% |
+| Single-task CNN, masked inputs (clean) | 23,714 | 94.74% | 74.3% [72.9, 75.8] | 0.784 | 73.8% |
 
-Imagine you're training a convolutional neural network to answer a single question: *Is this patch of Earth a forest or a residential area?*
+Means over 10 seeds. The full table, with the α sweep and soft sharing on clean inputs (60.7% on EuroSAT, 57.3% on AID), is in the report.
 
-The network has one job. It will learn whatever features get the training loss down fastest. Sometimes, that means learning the *right* thing: tree canopies look different from rooftops, vegetation has a distinct spectral signature. But sometimes — especially when data is scarce — it means learning shortcuts. A particular shadow pattern. A correlation with image brightness. A memorized patch that happens to appear often in one class.
+![Accuracy per AID group and model](docs/figures/per_group.png)
 
-On the training set, those shortcuts work perfectly. On new images, they fail. This is **overfitting**: the model has optimized for the wrong thing.
+**MTL trades one error for another.** The CNN gets at least 98% of AID residential scenes right but only 40% of AID forests. Hard sharing recovers forests (55%) and loses medium-density residential scenes (77%).
 
-### The MTL hypothesis
+![AID accuracy and reconstruction error across alpha](docs/figures/alpha_sweep.png)
 
-What if we gave the network a second job — one that *punishes* shortcuts?
+**No reconstruction weight beats the CNN.** Over α from 1 to 0.2, mean AID accuracy stays within 66.2–70.0%, against 69.3% for the CNN. Reconstruction error falls as its weight rises, so the decoder is learning. That learning does not carry over to AID accuracy.
 
-**Task 1 — Classification:** *Forest or residential?* This task wants the network to extract discriminative features: *What differentiates these two classes?*
+![AID accuracy after every epoch, one line per seed](docs/figures/epochs.png)
 
-**Task 2 — Reconstruction:** *Reconstruct the input image from the latent representation.* This task wants the network to preserve *everything*: every texture, every edge, every spatial detail. You can't reconstruct a rooftop if you've thrown away the information that makes it a rooftop.
+**One run cannot rank these models.** EuroSAT validation accuracy is flat while AID accuracy jumps from epoch to epoch, so the checkpoint rule cannot see the shift.
 
-The insight: **classification tends to discard information; reconstruction tends to preserve it.** When both objectives pull on the same shared encoder, the encoder is forced to find a representation that is simultaneously:
+![EuroSAT and AID example images with mean colour and edge strength](docs/figures/shift.png)
 
-- **Discriminative enough** to separate forests from residential areas
-- **Rich enough** to reconstruct the original image
+**AID forests are textured where EuroSAT forests are smooth.** Their edge strength is 7.1, against 1.9 for EuroSAT forests and 11.1 for EuroSAT residential. On this measure an AID forest sits between the two training classes, which explains why forests take most of the errors.
 
-There is no room for pure shortcuts. A representation that memorizes training examples without capturing true structure will fail the reconstruction objective. A representation that preserves every pixel but ignores semantics will fail the classification objective. The encoder must find the sweet spot: *the minimal sufficient statistic that satisfies both.* That, in theory, is a better representation.
+**The original notebook run (single seed), for reference.** These are AID confusion matrices from `notebooks/pierre/results/metrics_summary.json`:
 
-This is the **auxiliary task** or **multi-task regularization** perspective: the reconstruction task acts as a regularizer, preventing the encoder from collapsing into an overfitting classification machine.
+| model | AID acc | forest → forest / residential | residential → forest / residential |
+|---|---:|---:|---:|
+| Single-task CNN | 73.3% | 29 / 31 | 1 / 59 |
+| Hard-sharing MTL | 58.3% | 11 / 49 | 1 / 59 |
+| Soft sharing (scored on clean inputs) | 50.8% | 1 / 59 | 0 / 60 |
 
----
+All three numbers fall inside the seed distributions above. The soft-sharing collapse has a specific cause: the model was trained on masked inputs and scored on clean ones.
 
-## Part 2 — The setup: what we actually built
-
-### The data: EuroSAT RGB
-
-We use the [EuroSAT RGB dataset](https://www.kaggle.com/datasets/waseemalastal/eurosat-rgb-dataset): satellite imagery from the Sentinel-2 mission, cropped into 64×64 pixel patches. We restrict to two land-use classes:
-
-| Class | Description | What the network sees |
-|-------|--------------|------------------------|
-| **Forest** | Wooded areas, canopies, vegetation | Greens, textures, irregular shapes |
-| **Residential** | Buildings, roads, urban fabric | Grays, geometric patterns, straight edges |
-
-Satellite imagery is a natural fit for this experiment: the distinction between forest and residential is semantically clear, but both classes contain rich spatial detail (individual trees, roof shapes, shadows). A network that overfits might latch onto artifacts; one that generalizes must learn something about *structure*.
-
-### The architecture: one encoder, two heads
-
-```
-                    ┌─────────────────────────┐
-                    │   Input image (64×64)   │
-                    └───────────┬─────────────┘
-                                │
-                                ▼
-                    ┌─────────────────────────┐
-                    │   Shared CNN Encoder    │  ← The heart: one backbone for both tasks
-                    │   (conv layers → latents)│
-                    └───────────┬─────────────┘
-                                │
-              ┌─────────────────┼─────────────────┐
-              │                 │                 │
-              ▼                 │                 ▼
-    ┌─────────────────┐         │         ┌─────────────────┐
-    │ Classification  │         │         │  Reconstruction  │
-    │     Head        │         │         │      Head        │
-    │  (FC → 2 logits)│         │         │ (ConvTranspose → │
-    └────────┬────────┘         │         │  64×64 image)    │
-             │                  │         └────────┬─────────┘
-             ▼                  │                  ▼
-    ┌─────────────────┐         │         ┌─────────────────┐
-    │  Forest /       │         │         │  Reconstructed   │
-    │  Residential    │         │         │     image        │
-    └─────────────────┘         │         └─────────────────┘
-                                 │
-                    Loss = α·CrossEntropy + (1−α)·MSE
-```
-
-**Shared encoder:** A convolutional backbone (e.g., a few conv blocks) produces a latent vector or feature map. This representation is the *only* thing both heads see.
-
-**Classification head:** Fully connected layers map the latent representation to a binary output (Forest vs Residential). Trained with cross-entropy loss.
-
-**Reconstruction head:** Transposed convolutions (or a small decoder) map the latent representation back to a 64×64 RGB image. Trained with mean squared error (MSE) between output and input.
-
-**Combined loss:** We use a weighted sum:
-
-$$\mathcal{L} = \alpha \cdot \mathcal{L}_{\text{class}} + (1 - \alpha) \cdot \mathcal{L}_{\text{recon}}$$
-
-The hyperparameter \(\alpha\) controls the trade-off. \(\alpha = 1\) means classification only (single-task baseline). \(\alpha = 0.5\) gives equal weight to both. Finding the right \(\alpha\) is part of the experiment.
-
----
-
-## Part 3 — What we found (and what it means)
-
-*The following reflects the typical behavior observed in MTL experiments; your exact numbers will vary with architecture, data split, and \(\alpha\). The notebooks contain the full experiments.*
-
-### Finding 1: MTL reduces overfitting on small data
-
-When the training set is small (e.g., a few hundred images per class), the single-task classification model often reaches near-perfect training accuracy but drops significantly on the validation set. The MTL model, trained with reconstruction as an auxiliary task, tends to show a smaller gap between train and validation performance.
-
-**Interpretation:** The reconstruction objective prevents the encoder from specializing in spurious training-set patterns. It acts as a structural regularizer.
-
-### Finding 2: The value of \(\alpha\) matters
-
-Not all task weightings are equal. \(\alpha\) too high (e.g., 0.9) and the model almost ignores reconstruction — we're close to single-task. \(\alpha\) too low (e.g., 0.3) and the model focuses on reconstruction at the expense of classification accuracy. There is usually a range (e.g., \(\alpha \in [0.5, 0.7]\)) where both tasks are well-served and generalization is best.
-
-**Interpretation:** MTL is a balancing act. The auxiliary task helps only when it has enough influence to shape the representation.
-
-### Finding 3: Reconstruction quality as a diagnostic
-
-We can inspect the reconstructed images. If they are blurry, the encoder has discarded too much. If they are sharp but the classification is poor, the encoder may have preserved low-level detail at the cost of high-level semantics. A good MTL model often produces reconstructions that are *recognizably* forest or residential — suggesting the latent space has captured the right structure.
-
-**Interpretation:** Reconstruction is not just a regularizer; it is a window into what the encoder has learned.
-
-### Finding 4: When MTL might not help
-
-MTL is not a silver bullet. If the tasks are too unrelated, they can *interfere*: optimizing for one hurts the other. Here, classification and reconstruction are naturally aligned — both depend on understanding spatial structure — so the synergy holds. In other settings, task-specific encoders or more sophisticated MTL methods (e.g., uncertainty weighting, GradNorm) may be needed.
-
-**Interpretation:** MTL works when the auxiliary task provides a useful inductive bias. Choose your auxiliary task with care.
-
----
-
-## Part 4 — For the professor: the theory in one paragraph
-
-Multi-Task Learning can be framed as optimizing a shared representation \(\phi\) under a multi-objective loss. The key theoretical result (Caruana, 1997; Baxter, 2000) is that when tasks are related, the shared representation benefits from a *larger effective dataset*: the representation must satisfy multiple constraints, which reduces the hypothesis space and improves generalization. The reconstruction task, in particular, imposes a *denseness* constraint on the latent space — it must preserve enough information to recover the input — which prevents the representation from collapsing to a set of task-specific features that overfit. The optimal weighting \(\alpha\) can be interpreted as a Lagrange multiplier balancing the two objectives; in practice, it is usually tuned empirically.
-
----
-
-## Part 5 — Reproduce the experiments
-
-### Prerequisites
-
-- Python 3.8+
-- PyTorch
-- NumPy, Matplotlib
-- (Optional) A GPU for faster training
-
-### Setup
+## Reproduce
 
 ```bash
-git clone https://github.com/Pchambet/MTL_Classification_Reconstruction.git
-cd MTL_Classification_Reconstruction
-python -m venv .venv && source .venv/bin/activate   # or .venv\Scripts\activate on Windows
-pip install torch numpy matplotlib
+make setup    # uv sync --locked (Python 3.12, PyTorch)
+make data     # decode the committed images into data/interim/ (a few seconds)
+make run      # 65 training runs -> results/ (about 4 h on an Apple M-series GPU; resumable)
+make report   # figures -> docs/figures/, report -> site/index.html (about 6 s)
 ```
 
-### Data
+`results/` is committed, so `make report` alone rebuilds every figure and number without retraining. `make run` caches each (variant, seed) run in `data/interim/runs/` and skips the runs it has already done. `make test` and `make lint` run the checks that CI runs. Disk: 33 MB of images in the repository, 53 MB of cache, about 0.8 GB for the environment. A CPU-only run works but was not timed.
 
-1. Download [EuroSAT RGB](https://www.kaggle.com/datasets/waseemalastal/eurosat-rgb-dataset).
-2. Extract the **Forest** and **Residential** folders into `data/`:
+## Repository layout
 
 ```
-data/
-├── Forest/        ← forest patch images (.jpg)
-└── Residential/   ← residential patch images (.jpg)
+├── src/mtl_eurosat/       # data, models, training loop, grid, analysis, figures, report
+├── tests/                 # unit tests and a planted-effect test of the analysis
+├── results/               # per-run tables, summary.json, facts.json (every quoted number)
+├── docs/figures/          # static figures used here and in the report
+├── site/index.html        # self-contained report (GitHub Pages)
+├── notebooks/             # the original course notebooks (Mahouna's and Pierre's)
+└── data/                  # EuroSAT Forest/Residential and the AID OOD set, as committed by the team
 ```
 
-### Run
+## Methodology notes and limitations
 
-Each team member has a notebook folder with their experiments. Open the notebooks in `notebooks/<name>/` and run the cells. The pipeline typically includes:
+- **Small test set.** AID has 60 forest images, so one image is worth 1.7 points of forest accuracy. Confidence intervals cover seed-to-seed variance only, not the sampling error of the test set.
+- **Multiple comparisons.** The 14 paired comparisons are not corrected for multiple testing. At the Bonferroni threshold (p < 0.0036) three survive: soft sharing's AUROC gains over both CNNs, and the masked-input CNN's forest accuracy on clean inputs (73.8% vs 39.7%). The accuracy effects above, the +3.8 pp of the reconstruction loss included, are suggestive rather than established.
+- **Soft sharing ranks better, but this design cannot say why.** Its AUROC (0.89 vs 0.81 for the masked-input CNN) is the clearest positive effect here. It also has 15× more parameters than that CNN, and the design cannot separate capacity from reconstruction.
+- **Masking costs accuracy on clean inputs.** Trained on masked inputs, the CNN drops from 99.96% to 94.7% on clean EuroSAT validation images, even as it improves on clean AID.
+- **Scope.** One architecture family, 10 epochs, no augmentation beyond the masking ablation, α tuned only through the sweep. The soft-sharing loss weights are kept as set in the notebook.
+- **Fixed from the notebooks.** The notebooks kept `model.state_dict()` as the "best" checkpoint, which is a view of the live weights, so they restored the last epoch trained, not the best one. The pipeline deep-copies it. The AID set is scored after every epoch for diagnosis only; it never drives checkpoint selection.
+- **Determinism.** Training ran on an Apple GPU (MPS), which is not bit-for-bit deterministic. Re-runs reproduce the distributions, not every digit.
+- **Not tested here, and more likely to help:** colour and scale augmentation, a handful of labelled AID images, domain adaptation.
 
-1. Data loading and preprocessing (resize, normalize)
-2. Model definition (encoder + classification head + reconstruction head)
-3. Training loop with combined loss
-4. Evaluation (accuracy, reconstruction MSE, qualitative inspection)
+## Credits
 
-```bash
-jupyter notebook notebooks/pierre/
-```
+This started as a team project in the M2 Data Science programme at Télécom SudParis (2025–2026), by Alexi, Houssem, Mahouna Vayssières and Pierre Chambet. Mahouna assembled the dataset and wrote the first notebooks (`notebooks/mahouna/`). The multi-seed pipeline, the controls and this analysis were added in 2026.
+
+## References
+
+- R. Caruana, [Multitask Learning](https://doi.org/10.1023/A:1007379606734), *Machine Learning* 28, 1997.
+- P. Helber, B. Bischke, A. Dengel, D. Borth, [EuroSAT: A Novel Dataset and Deep Learning Benchmark for Land Use and Land Cover Classification](https://arxiv.org/abs/1709.00029), *IEEE JSTARS*, 2019. Data: [github.com/phelber/EuroSAT](https://github.com/phelber/EuroSAT) (MIT), RGB copy from [Kaggle](https://www.kaggle.com/datasets/waseemalastal/eurosat-rgb-dataset).
+- G.-S. Xia et al., [AID: A Benchmark Data Set for Performance Evaluation of Aerial Scene Classification](https://arxiv.org/abs/1608.05167), *IEEE TGRS*, 2017. Data: [captain-whu.github.io/AID](https://captain-whu.github.io/AID/).
+- K. He et al., [Masked Autoencoders Are Scalable Vision Learners](https://arxiv.org/abs/2111.06377), CVPR 2022.
+- S. Ruder, [An Overview of Multi-Task Learning in Deep Neural Networks](https://arxiv.org/abs/1706.05098), 2017.
 
 ---
 
-## Project structure
-
-```
-MTL_Classification_Reconstruction/
-├── data/                    # EuroSAT Forest & Residential images (you download)
-│   ├── Forest/
-│   └── Residential/
-├── notebooks/               # Per-member experiment notebooks
-│   ├── alexi/
-│   ├── houssem/
-│   ├── mahouna/
-│   └── pierre/
-├── src/
-│   └── resize.py            # Image preprocessing utilities
-├── README.md
-├── LICENSE
-└── arborescence.txt         # Full file tree (if needed)
-```
-
----
-
-## Tech stack
-
-| Component | Technology |
-|-----------|------------|
-| Deep Learning | PyTorch |
-| Data | NumPy, image I/O |
-| Visualization | Matplotlib |
-| Preprocessing | Custom utilities in `src/` |
-
----
-
-## Key references
-
-- **Caruana, R.** (1997). *Multitask learning.* Machine learning, 28(1), 41-75.
-- **Ruder, S.** (2017). *An overview of multi-task learning in deep neural networks.* arXiv:1706.05098.
-- **Zhang, Y. & Yang, Q.** (2017). *A survey on multi-task learning.* arXiv:1707.08114.
-
----
-
-## Team
-
-Group project — Télécom SudParis, M2 Data Science.  
-Alexi, Houssem, Mahouna, Pierre — 2025/2026.
-
----
-
-## License
-
-MIT — see [LICENSE](LICENSE).
-
----
-
-*"The best way to understand a model is to ask it to do two things at once — and see what it chooses to remember."*
+Built by [Pierre Chambet](https://github.com/Pchambet) — decision science for operations under uncertainty.
