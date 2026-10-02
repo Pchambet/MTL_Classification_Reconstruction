@@ -1,6 +1,6 @@
 # MTL_Classification_Reconstruction
 
-Does adding a reconstruction task make a satellite-image classifier robust to a new sensor? Over 10 seeds and an out-of-distribution test set, no: multi-task learning lands where a single-task CNN already was, and the gains that do appear follow the input masking, not the reconstruction.
+Does adding a reconstruction task make a satellite-image classifier robust to a new sensor? Over 10 seeds and an out-of-distribution test set, not for accuracy: hard-sharing MTL lands where a single-task CNN already was, and soft sharing's accuracy gain is matched by input masking alone. Only soft sharing's ranking (AUROC) improves, for reasons this design cannot isolate.
 
 [![ci](https://github.com/Pchambet/MTL_Classification_Reconstruction/actions/workflows/ci.yml/badge.svg)](https://github.com/Pchambet/MTL_Classification_Reconstruction/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-0d9488)
@@ -12,10 +12,10 @@ Does adding a reconstruction task make a satellite-image classifier robust to a 
 ## TL;DR
 
 - **The in-distribution task is saturated.** Scored on the inputs it was trained on, every model reaches ≥ 99.0% on EuroSAT validation, on every seed. Validation accuracy cannot tell the models apart.
-- **On AID aerial images, hard-sharing MTL does not beat the single-task CNN:** 70.0% vs 69.3% accuracy, a paired difference of **+0.7 pp (95% CI −2.9 to +4.2, p = 0.68)**. It ranks worse: AUROC −0.053 (CI −0.086 to −0.020).
-- **The reconstruction loss only offsets the larger model.** With the architecture held fixed, it adds +3.8 pp (CI +0.7 to +6.9), but the 8× larger architecture on its own loses 3.2 pp (CI −5.8 to −0.5) against the small CNN.
-- **Masking alone matches soft sharing's 73.3%.** A single-task CNN trained on the same 30%-masked inputs reaches 71.9%, and soft sharing adds +1.4 pp (CI −2.3 to +5.2). Trained on masked inputs and scored on clean ones, that CNN gets 74.3% on AID, the best accuracy measured.
-- **The original single-seed comparison was noise.** The course notebook ranked CNN 73.3% > MTL 58.3% > soft sharing 50.8%. Across seeds, the CNN spans 65–73% and MTL 63–78%. Within a typical run, AID accuracy moves 15–16 points between epochs 3 and 10.
+- **On AID aerial images, hard-sharing MTL does not beat the single-task CNN:** 70.0% vs 69.3% accuracy, a paired difference of **+0.7 pp (95% CI −2.9 to +4.2, p = 0.68)**. With the architecture held fixed, the reconstruction loss appears to add +3.8 pp (p = 0.02), about what the hard-sharing architecture loses on its own against the CNN (−3.2 pp, p = 0.02). MTL also seems to rank worse (AUROC −0.053, p = 0.005). None of these three effects is significant after correcting for 14 comparisons.
+- **Masking alone matches soft sharing's accuracy.** A single-task CNN trained on the same 30%-masked inputs reaches 71.9% against soft sharing's 73.3% (+1.4 pp, CI −2.3 to +5.2, p = 0.41). Trained on masked inputs and scored on clean ones, that CNN gets 74.3% on AID, the best mean AID accuracy of any model.
+- **Soft sharing ranks better, for reasons this design cannot isolate.** Its AID AUROC is 0.89 against 0.81 for the masked-input CNN (+0.078, CI +0.056 to +0.100, p < 0.001), which survives the Bonferroni correction. It also has 15× more parameters, so capacity and reconstruction are confounded.
+- **The original single-seed comparison was noise.** The course notebook ranked CNN 73.3% > MTL 58.3% > soft sharing 50.8%. Its checkpointing bug restored the last epoch, and last-epoch AID accuracy across seeds spans 67.5–78.3% for the CNN, 48.3–75.0% for MTL and 50.0–68.3% for soft sharing on clean inputs: all three notebook numbers fall inside. Within a typical run, AID accuracy moves 15–16 points between epochs 3 and 10.
 
 ## Why it matters
 
@@ -29,7 +29,7 @@ A reconstruction head is often presented as a free regulariser: keep the whole i
    - a 193k-parameter hard-sharing network (shared encoder, classifier, decoder) trained on α·CE + (1 − α)·MSE;
    - a 360k-parameter soft-sharing network (two branches tied by an alignment loss, masked-autoencoder reconstruction on inputs with 30% of pixels zeroed).
 3. **Controls.** Two controls isolate the effect of reconstruction:
-   - hard sharing with **α = 1** (same architecture, decoder unused) separates the auxiliary loss from the larger model;
+   - hard sharing with **α = 1** (same architecture, decoder unused) separates the auxiliary loss from the different architecture. That architecture is deeper, uses BatchNorm and has 94k parameters on its classification path, about 4× the CNN; the decoder, unused at α = 1, holds the rest of the 193k;
    - a **single-task CNN trained on the same masked inputs** separates soft sharing from its masking.
 4. **Protocol.** Each model trains for 10 epochs of Adam (lr 10⁻³, batch 32). We keep the checkpoint with the lowest validation loss. The headline variants run on 10 seeds and the rest of the α sweep (0.8, 0.4, 0.2) on 5, for 65 runs in total. Each seed fixes the split, the initialisation and the masks. Differences are paired by seed and reported with a t interval.
 5. **Report.** Every number in this README and in the [report](https://pchambet.github.io/MTL_Classification_Reconstruction/) is computed from `results/` (`results/summary.json`, `results/facts.json`).
@@ -57,21 +57,21 @@ Means over 10 seeds. The full table, with the α sweep and soft sharing on clean
 
 ![AID accuracy after every epoch, one line per seed](docs/figures/epochs.png)
 
-**One run cannot rank these models.** EuroSAT validation accuracy is flat while AID accuracy jumps from epoch to epoch, so the checkpoint rule cannot see the shift.
+**One run cannot rank these models.** EuroSAT validation accuracy is nearly flat in a typical run (median swing ≤ 3.1 points over epochs 3–10) while AID accuracy jumps 15–16 points, so the checkpoint rule cannot see the shift.
 
 ![EuroSAT and AID example images with mean colour and edge strength](docs/figures/shift.png)
 
-**AID forests are textured where EuroSAT forests are smooth.** Their edge strength is 7.1, against 1.9 for EuroSAT forests and 11.1 for EuroSAT residential. On this measure an AID forest sits between the two training classes, which explains why forests take most of the errors.
+**AID forests are textured where EuroSAT forests are smooth.** Their edge strength is 7.1, against 1.9 for EuroSAT forests and 11.1 for EuroSAT residential. On this measure an AID forest sits between the two training classes, which is consistent with forests taking most of the errors.
 
 **The original notebook run (single seed), for reference.** These are AID confusion matrices from `notebooks/pierre/results/metrics_summary.json`:
 
 | model | AID acc | forest → forest / residential | residential → forest / residential |
 |---|---:|---:|---:|
 | Single-task CNN | 73.3% | 29 / 31 | 1 / 59 |
-| Hard-sharing MTL | 58.3% | 11 / 49 | 1 / 59 |
+| Hard-sharing MTL (α = 0.6) | 58.3% | 11 / 49 | 1 / 59 |
 | Soft sharing (scored on clean inputs) | 50.8% | 1 / 59 | 0 / 60 |
 
-All three numbers fall inside the seed distributions above. The soft-sharing collapse has a specific cause: the model was trained on masked inputs and scored on clean ones.
+The MTL run used α = 0.6, and its 58.3% lies below every best-checkpoint seed in the table above (63.3–77.5%). The reason is the checkpointing bug described under limitations: the notebook restored the last epoch, not the best one. At the last epoch, AID accuracy across the 10 seeds spans 67.5–78.3% for the CNN, 48.3–75.0% for hard-sharing MTL (α = 0.6) and 50.0–68.3% for soft sharing on clean inputs, and all three notebook numbers fall inside those ranges. The soft-sharing collapse has a further cause: the model was trained on masked inputs and scored on clean ones.
 
 ## Reproduce
 
@@ -115,7 +115,7 @@ This started as a team project in the M2 Data Science programme at Télécom Sud
 
 - R. Caruana, [Multitask Learning](https://doi.org/10.1023/A:1007379606734), *Machine Learning* 28, 1997.
 - P. Helber, B. Bischke, A. Dengel, D. Borth, [EuroSAT: A Novel Dataset and Deep Learning Benchmark for Land Use and Land Cover Classification](https://arxiv.org/abs/1709.00029), *IEEE JSTARS*, 2019. Data: [github.com/phelber/EuroSAT](https://github.com/phelber/EuroSAT) (MIT), RGB copy from [Kaggle](https://www.kaggle.com/datasets/waseemalastal/eurosat-rgb-dataset).
-- G.-S. Xia et al., [AID: A Benchmark Data Set for Performance Evaluation of Aerial Scene Classification](https://arxiv.org/abs/1608.05167), *IEEE TGRS*, 2017. Data: [captain-whu.github.io/AID](https://captain-whu.github.io/AID/).
+- G.-S. Xia et al., [AID: A Benchmark Data Set for Performance Evaluation of Aerial Scene Classification](https://arxiv.org/abs/1608.05167), *IEEE TGRS*, 2017. Data: [captain-whu.github.io/AID](https://captain-whu.github.io/AID/) (Google Earth imagery; the page carries "© Gui-Song Xia 2016" and states no licence). The 120 AID images in `data/` are redistributed only as a small out-of-distribution evaluation subset for research and teaching; cite the paper above if you use them.
 - K. He et al., [Masked Autoencoders Are Scalable Vision Learners](https://arxiv.org/abs/2111.06377), CVPR 2022.
 - S. Ruder, [An Overview of Multi-Task Learning in Deep Neural Networks](https://arxiv.org/abs/1706.05098), 2017.
 
