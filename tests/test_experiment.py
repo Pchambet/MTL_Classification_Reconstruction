@@ -85,6 +85,17 @@ def test_epoch_swing_is_the_median_within_run_range():
     assert np.isnan(analysis.epoch_swing(history, "soft", "ood_acc"))
 
 
+def test_last_epoch_takes_each_seeds_final_epoch():
+    # what the notebooks restored: the last epoch trained, whatever its validation loss
+    history = [
+        {"variant": "cnn", "seed": seed, "epoch": e, "ood_acc": acc}
+        for seed, accs in ((1, [0.9, 0.6, 0.5]), (0, [0.1, 0.7]))
+        for e, acc in enumerate(accs, start=1)
+    ]
+    assert analysis.last_epoch(history, "cnn", "ood_acc").tolist() == [0.7, 0.5]
+    assert analysis.last_epoch(history, "soft", "ood_acc").size == 0
+
+
 def test_as_trained_scores_masked_models_on_masked_inputs(results):
     rows = analysis.runs(results)
     # soft is 0.55 on clean AID images and 0.7 on masked ones, the inputs it was trained on

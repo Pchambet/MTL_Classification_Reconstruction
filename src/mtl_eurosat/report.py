@@ -12,7 +12,7 @@ import shutil
 from pathlib import Path
 from string import Template
 
-from mtl_eurosat import analysis, data, figures
+from mtl_eurosat import analysis, data, figures, models
 from mtl_eurosat.config import AMBER, FIGURES, RESULTS, SITE, SLATE, TEAL
 
 PLOTLY = "https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"
@@ -44,7 +44,7 @@ COMPARISON = {
     "aux_loss_auroc": "reconstruction loss, architecture fixed (AUROC)",
     "mtl_vs_cnn": "hard-sharing MTL vs CNN (AID accuracy)",
     "mtl_vs_cnn_auroc": "hard-sharing MTL vs CNN (AUROC)",
-    "arch": "larger architecture alone (AID accuracy)",
+    "arch": "hard-sharing architecture alone, no reconstruction (AID accuracy)",
     "soft_masked_vs_cnn": "soft sharing vs CNN (AID accuracy)",
     "soft_masked_vs_cnn_auroc": "soft sharing vs CNN (AUROC)",
     "cnn_masked_vs_cnn": "masked-input CNN, masked scoring, vs CNN (AID accuracy)",
@@ -214,7 +214,15 @@ def key_facts(rows: list[dict], history: list[dict], out: dict, shift: dict) -> 
         return _pct(s[v][key]["mean"], digits)
 
     def rng(v: str, key: str = "ood_acc") -> str:
-        return f"{_pct(s[v][key]['min'], 0)}–{_pct(s[v][key]['max'], 0)}"
+        return f"{_pct(s[v][key]['min'])}–{_pct(s[v][key]['max'])}"
+
+    # The notebooks restored the last epoch, so their numbers are draws from these ranges.
+    last = {v: analysis.last_epoch(history, v, "ood_acc") for v in ("cnn", "hard_a0.6", "soft")}
+    notebook = {"cnn": nb["baseline"], "hard_a0.6": nb["mtl"], "soft": nb["softshare"]}
+    inside = sum(last[v].min() <= notebook[v] <= last[v].max() for v in last)
+    hard = models.HardShareMTL()
+    hard_cls = models.n_parameters(hard.shared) + models.n_parameters(hard.cls_head)
+    swing_val = max(analysis.epoch_swing(history, v, "val_acc") for v in ("cnn", "hard_a0.6"))
 
     return {
         "edge_eu_forest": f"{shift['eurosat_forest']:.1f}",
@@ -224,8 +232,8 @@ def key_facts(rows: list[dict], history: list[dict], out: dict, shift: dict) -> 
         "n_seeds": str(s["cnn"]["n_seeds"]),
         "n_seeds_sweep": str(s["hard_a0.8"]["n_seeds"]) if "hard_a0.8" in s else "",
         "val_min": _pct(span["val_min"]),
-        "ood_lo": _pct(span["ood_lo"], 0),
-        "ood_hi": _pct(span["ood_hi"], 0),
+        "ood_lo": _pct(span["ood_lo"]),
+        "ood_hi": _pct(span["ood_hi"]),
         "cnn_ood": _ci(s["cnn"]["ood_acc"]),
         "cnn_ood_mean": mean("cnn", "ood_acc"),
         "hard06_ood": _ci(s["hard_a0.6"]["ood_acc"]),
@@ -247,16 +255,14 @@ def key_facts(rows: list[dict], history: list[dict], out: dict, shift: dict) -> 
         "cnn_forest": mean("cnn", "ood_acc_Forest", 0),
         "hard06_forest": mean("hard_a0.6", "ood_acc_Forest", 0),
         "cnn_res_min": _pct(
-            min(
-                s["cnn"][f"ood_acc_{g}"]["mean"] for g in ("DenseResidential", "MediumResidential")
-            ),
-            0,
+            min(s["cnn"][f"ood_acc_{g}"]["mean"] for g in ("DenseResidential", "MediumResidential"))
         ),
         "hard06_medium": mean("hard_a0.6", "ood_acc_MediumResidential", 0),
         "cnn_auroc": f"{s['cnn']['ood_auroc']['mean']:.2f}",
         "hard06_auroc": f"{s['hard_a0.6']['ood_auroc']['mean']:.2f}",
         "swing_cnn": f"{analysis.epoch_swing(history, 'cnn', 'ood_acc') * 100:.0f}",
         "swing_hard06": f"{analysis.epoch_swing(history, 'hard_a0.6', 'ood_acc') * 100:.0f}",
+        "swing_val": f"{swing_val * 100:.1f}",
         "soft_val": mean("soft", "val_acc"),
         "soft_val_masked": mean("soft", "val_acc_masked"),
         "soft_ood": _ci(soft["ood_acc"]),
@@ -284,9 +290,15 @@ def key_facts(rows: list[dict], history: list[dict], out: dict, shift: dict) -> 
         "params_cnn": f"{s['cnn']['n_params'] / 1000:.0f}k",
         "params_hard": f"{s['hard_a0.6']['n_params'] / 1000:.0f}k",
         "params_soft": f"{soft['n_params'] / 1000:.0f}k",
+        "params_hard_cls": f"{hard_cls / 1000:.0f}k",
+        "hard_cls_ratio": f"{hard_cls / s['cnn']['n_params']:.0f}",
         "nb_cnn": _pct(nb["baseline"]),
         "nb_mtl": _pct(nb["mtl"]),
         "nb_soft": _pct(nb["softshare"]),
+        "last_cnn_range": f"{_pct(last['cnn'].min())}–{_pct(last['cnn'].max())}",
+        "last_hard06_range": f"{_pct(last['hard_a0.6'].min())}–{_pct(last['hard_a0.6'].max())}",
+        "last_soft_range": f"{_pct(last['soft'].min())}–{_pct(last['soft'].max())}",
+        "nb_inside": "All three" if inside == len(last) else f"{inside} of the {len(last)}",
     }
 
 
@@ -303,7 +315,7 @@ def build(results: Path = RESULTS) -> None:
         alpha=json.dumps(alpha_traces(rows)),
         epochs=json.dumps(epoch_traces(history)),
         results_table=results_table(out["variants"]),
-        **facts,
+        **{k: html.escape(v) for k, v in facts.items()},
     )
     SITE.mkdir(parents=True, exist_ok=True)
     (SITE / "index.html").write_text(page)

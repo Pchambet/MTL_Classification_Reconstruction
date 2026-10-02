@@ -60,13 +60,15 @@ footer { margin-top: 56px; font-size: 0.85rem; color: var(--muted); overflow-wra
 <h1>Does a reconstruction task make a satellite classifier robust to a new sensor?</h1>
 <p class="lede">A course project claimed that training one encoder to classify <em>and</em> reconstruct
 satellite images makes it generalise better. Re-run over $n_seeds seeds and scored on aerial images
-from a different sensor, the claim does not hold: hard-sharing MTL lands where a single-task CNN
-already was, and the gains that do appear follow the input masking, not the reconstruction.</p>
+from a different sensor, the claim does not hold for accuracy: hard-sharing MTL lands where a single-task
+CNN already was, and soft sharing's accuracy gain is matched by input masking alone. Only soft sharing's
+ranking (AUROC) improves, for reasons this design cannot isolate.</p>
 
 <div class="kpis">
   <div class="kpi"><b>≥ $val_min</b><span>EuroSAT validation accuracy of every model and seed, scored as trained: the in-distribution task is saturated</span></div>
   <div class="kpi"><b>$cnn_ood_mean → $hard06_ood_mean</b><span>AID accuracy, single-task CNN → hard-sharing MTL (α = 0.6): $mtl_vs_cnn, $mtl_vs_cnn_p</span></div>
-  <div class="kpi"><b>$masking_clean</b><span>AID accuracy gained by the single-task CNN when trained on masked inputs, no reconstruction at all</span></div>
+  <div class="kpi"><b>$masking_clean</b><span>AID accuracy gained by the single-task CNN when trained on masked inputs, no reconstruction at all ($masking_clean_p)</span></div>
+  <div class="kpi"><b>$cm_auroc_masked → $soft_auroc_masked</b><span>AID AUROC, masked-input CNN → soft sharing ($soft_vs_cm_auroc_p): survives correction, but with $params_ratio× the parameters</span></div>
 </div>
 
 <figure><img src="figures/hero.png" alt="EuroSAT validation and AID accuracy of every model, one dot per seed"></figure>
@@ -83,7 +85,7 @@ cheap robustness fix or a distraction from augmentation and target-domain labels
 <li><b>Train / validate:</b> 6,000 EuroSAT RGB patches (3,000 forest, 3,000 residential, 64×64), stratified 80/20 split drawn per seed.</li>
 <li><b>Out of distribution:</b> 120 AID images resized to 64×64: 60 forest, 30 dense residential, 30 medium residential. Never used for training or checkpoint selection.</li>
 <li><b>Models</b> (the course notebooks' architectures): a $params_cnn-parameter single-task CNN; a $params_hard-parameter hard-sharing network (shared encoder, classification head, decoder) trained on α·CE + (1 − α)·MSE; a $params_soft-parameter soft-sharing network (two branches tied by an alignment loss, masked-autoencoder reconstruction on inputs with 30% of pixels zeroed).</li>
-<li><b>Controls:</b> the hard-sharing network with α = 1 (same architecture, reconstruction switched off) separates the auxiliary loss from the larger model; the single-task CNN trained on the same 30%-masked inputs separates soft sharing from its input masking.</li>
+<li><b>Controls:</b> the hard-sharing network with α = 1 (same architecture, reconstruction switched off) separates the auxiliary loss from the different architecture; the single-task CNN trained on the same 30%-masked inputs separates soft sharing from its input masking.</li>
 <li><b>Protocol:</b> 10 epochs of Adam (lr 10⁻³, batch 32), checkpoint with the lowest validation loss, $n_seeds seeds for the headline variants and $n_seeds_sweep for the rest of the α sweep. Differences are paired by seed (same split) with a t interval.</li>
 </ul>
 
@@ -92,11 +94,13 @@ cheap robustness fix or a distraction from augmentation and target-domain labels
 <p class="caption">One dot per seed, clean inputs. Hover for values. The validation split cannot rank the models; the AID set can, barely.</p>
 $results_table
 <p class="caption">All rows on clean inputs. The two masked-input models are scored on masked images, as trained, in the last section.</p>
-<p>The reconstruction loss does move AID accuracy when the architecture is held fixed:
-<b>$aux</b> ($aux_p). But the larger architecture on its own costs $arch ($arch_p) against the small
-single-task CNN, so the net result of the course project's comparison, hard-sharing MTL against the
-CNN, is <b>$mtl_vs_cnn</b> ($mtl_vs_cnn_p). On ranking quality MTL is worse: AUROC
-$mtl_vs_cnn_auroc ($mtl_vs_cnn_auroc_p).</p>
+<p>With the architecture held fixed, the reconstruction loss appears to move AID accuracy:
+<b>$aux</b> ($aux_p). But the hard-sharing architecture on its own (deeper, with BatchNorm, $params_hard_cls
+parameters on the classification path, about $hard_cls_ratio× the CNN; the unused decoder makes up the rest
+of its $params_hard) costs $arch ($arch_p) against the single-task CNN, so the net result of the course
+project's comparison, hard-sharing MTL against the CNN, is <b>$mtl_vs_cnn</b> ($mtl_vs_cnn_p). MTL also
+ranks worse: AUROC $mtl_vs_cnn_auroc ($mtl_vs_cnn_auroc_p). None of these three effects survives a
+correction for the $n_comparisons comparisons (Limitations).</p>
 
 <h2>Where the errors are</h2>
 <figure><img src="figures/per_group.png" alt="Accuracy per AID group and model"></figure>
@@ -114,12 +118,16 @@ $edge_eu_res, AID residential $edge_aid_res. On this texture measure an AID fore
 
 <h2>A single run cannot settle it</h2>
 <div id="epochs" class="chart"></div>
-<p class="caption">AID accuracy after every epoch, one line per seed, while EuroSAT validation accuracy sits near 100%.</p>
+<p class="caption">AID accuracy after every epoch, one line per seed, while EuroSAT validation accuracy stays near 100% in a typical run.</p>
 <p>Across epochs 3 to 10 of a typical run, AID accuracy spans $swing_cnn points (CNN) and $swing_hard06
-points (MTL) while validation accuracy barely moves, so the checkpoint rule cannot see it. Across seeds,
-the CNN ranges $cnn_range on AID, hard-sharing MTL $hard06_range and soft sharing on clean inputs
-$soft_range. The original notebook's single-seed numbers, $nb_cnn (CNN), $nb_mtl (MTL) and $nb_soft
-(soft sharing), are draws from these distributions, not a ranking.</p>
+points (MTL) while validation accuracy moves at most $swing_val points (medians over seeds), so the
+checkpoint rule cannot see it. At the best checkpoint, the CNN ranges $cnn_range on AID across seeds, hard-sharing MTL (α = 0.6)
+$hard06_range and soft sharing on clean inputs $soft_range.</p>
+<p>The original notebook reported $nb_cnn (CNN), $nb_mtl (MTL, α = 0.6) and $nb_soft (soft sharing, clean
+inputs). Its MTL number lies below every best-checkpoint seed, because the notebook restored the last epoch,
+not the best one (see Limitations). At the last epoch, AID accuracy across seeds spans $last_cnn_range for
+the CNN, $last_hard06_range for hard-sharing MTL and $last_soft_range for soft sharing on clean inputs.
+$nb_inside notebook numbers fall inside these ranges: they are single draws, not a ranking.</p>
 
 <h2>Turning the reconstruction weight up does not help either</h2>
 <div id="alpha" class="chart"></div>
@@ -127,7 +135,7 @@ $soft_range. The original notebook's single-seed numbers, $nb_cnn (CNN), $nb_mtl
 <figure><img src="figures/alpha_sweep.png" alt="AID accuracy and reconstruction error across the alpha sweep"></figure>
 <figure><img src="figures/reconstructions.png" alt="Reconstructions of EuroSAT and AID images"></figure>
 
-<h2>Soft sharing: the gain is the masking</h2>
+<h2>Soft sharing: the accuracy gain is the masking</h2>
 <p>The soft-sharing network only ever sees images with 30% of their pixels zeroed. Scored on clean
 EuroSAT images it reaches $soft_val ($soft_val_masked on masked ones) and on clean AID images
 $soft_ood: the notebook's collapse to $nb_soft came from scoring a masked-input model on unmasked
@@ -145,6 +153,7 @@ plain CNN, $masking_clean_p; forest $cm_forest_clean), at the price of $cm_val_c
 <li>The AID set is small: 60 forest images, so one image is 1.7 points of forest accuracy. Confidence intervals are across seeds and do not include the sampling error of the test set itself.</li>
 <li>$n_comparisons paired comparisons are reported, without a multiple-testing correction. At the Bonferroni threshold (p &lt; $bonferroni) $n_bonferroni stay significant: $bonferroni_list. Effects with p between that threshold and 0.05 are suggestive, not established.</li>
 <li>One architecture family, 10 epochs, no data augmentation beyond the masking ablation, no tuning of α beyond the sweep, the soft-sharing loss weights as set in the notebook.</li>
+<li>The notebooks kept <code>model.state_dict()</code> as their "best" checkpoint. That is a view of the live weights, so they restored the last epoch trained. The pipeline deep-copies the best checkpoint. AID is scored after every epoch for diagnosis only and never drives checkpoint selection.</li>
 <li>Training ran on an Apple GPU (MPS), which is not bit-for-bit deterministic; re-runs reproduce the distributions, not every digit.</li>
 <li>Untested here and more likely to help: colour and scale augmentation, a handful of labelled AID images, domain adaptation.</li>
 </ul>

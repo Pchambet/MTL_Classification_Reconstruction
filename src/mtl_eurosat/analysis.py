@@ -153,6 +153,19 @@ def epoch_swing(history: list[dict], variant: str, key: str, first_epoch: int = 
     return float(np.median(spans)) if spans else float("nan")
 
 
+def last_epoch(history: list[dict], variant: str, key: str) -> np.ndarray:
+    """``key`` at the final epoch of every seed of ``variant``, ordered by seed.
+
+    The notebooks restored the last epoch trained (their "best" checkpoint was a view of the
+    live weights), so this, not the best checkpoint, is the distribution their numbers came from.
+    """
+    final: dict[int, tuple[int, float]] = {}
+    for h in history:
+        if h["variant"] == variant and h["epoch"] >= final.get(h["seed"], (0, 0.0))[0]:
+            final[h["seed"]] = (h["epoch"], h[key])
+    return np.array([final[s][1] for s in sorted(final)], dtype=float)
+
+
 def _get(rows: list[dict], variant: str, seed: int, key: str) -> float:
     return next(r.get(key, np.nan) for r in rows if r["variant"] == variant and r["seed"] == seed)
 
