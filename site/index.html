@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reconstruction vs Domain Shift</title>
+<meta name="description" content="Does a reconstruction auxiliary task make a satellite-image classifier robust to a new sensor? A multi-seed study, EuroSAT to AID.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<style>
+:root {
+  --bg: #ffffff; --ink: #0f172a; --muted: #64748b; --rule: #e2e8f0; --panel: #f8fafc;
+  --teal: #0d9488; --amber: #d97706; --slate: #64748b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b1120; --ink: #e2e8f0; --muted: #94a3b8; --rule: #1e293b; --panel: #111827;
+    --teal: #2dd4bf; --amber: #f59e0b; --slate: #94a3b8;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b1120; --ink: #e2e8f0; --muted: #94a3b8; --rule: #1e293b; --panel: #111827;
+  --teal: #2dd4bf; --amber: #f59e0b; --slate: #94a3b8;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.65 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 860px; margin: 0 auto; padding: 48px 16px 80px; }
+h1 { font-size: 2rem; line-height: 1.2; margin: 0 0 8px; letter-spacing: -0.01em; }
+h2 { font-size: 1.3rem; margin: 48px 0 8px; padding-top: 16px; border-top: 1px solid var(--rule); }
+h3 { font-size: 1.05rem; margin: 28px 0 4px; }
+.lede { font-size: 1.1rem; color: var(--muted); margin: 0 0 24px; }
+.meta { font-size: 0.85rem; color: var(--muted); }
+a { color: var(--teal); }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 24px 0; }
+.kpi { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; }
+.kpi b { display: block; font-size: 1.5rem; line-height: 1.2; }
+.kpi span { font-size: 0.85rem; color: var(--muted); }
+.chart { width: 100%; height: 420px; margin: 8px 0 4px; overflow: hidden; }
+.caption { font-size: 0.85rem; color: var(--muted); margin: 0 0 20px; }
+figure { margin: 16px 0 24px; }
+figure img { width: 100%; height: auto; border-radius: 8px; background: #fff; }
+.table { overflow-x: auto; margin: 12px 0 20px; }
+table { border-collapse: collapse; width: 100%; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; }
+code { font-size: 0.9em; background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
+footer { margin-top: 56px; font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+<p class="meta">Multi-task learning · domain shift · EuroSAT → AID · 10 seeds</p>
+<h1>Does a reconstruction task make a satellite classifier robust to a new sensor?</h1>
+<p class="lede">A course project claimed that training one encoder to classify <em>and</em> reconstruct
+satellite images makes it generalise better. Re-run over 10 seeds and scored on aerial images
+from a different sensor, the claim does not hold: hard-sharing MTL lands where a single-task CNN
+already was, and the one gain that does survive comes from masking the inputs, not from reconstructing them.</p>
+
+<div class="kpis">
+  <div class="kpi"><b>≥ 99.0%</b><span>EuroSAT validation accuracy of every model and seed, scored as trained: the in-distribution task is saturated</span></div>
+  <div class="kpi"><b>69.3% → 70.0%</b><span>AID accuracy, single-task CNN → hard-sharing MTL (α = 0.6): +0.7 pp [-2.9, +4.2], p = 0.68</span></div>
+  <div class="kpi"><b>+5.0 pp [+1.9, +8.1]</b><span>AID accuracy gained by the single-task CNN when trained on masked inputs, no reconstruction at all</span></div>
+</div>
+
+<figure><img src="figures/hero.png" alt="EuroSAT validation and AID accuracy of every model, one dot per seed"></figure>
+
+<h2>The question</h2>
+<p>Train on Sentinel-2 patches of forest and residential land (EuroSAT), deploy on Google Earth aerial
+images of the same two land uses (AID). Classification-only training can latch onto shortcuts of the
+training sensor; a reconstruction head forces the shared encoder to keep the whole image. Does that
+auxiliary task buy robustness to the sensor change? The answer decides whether an auxiliary loss is a
+cheap robustness fix or a distraction from augmentation and target-domain labels.</p>
+
+<h2>Setup</h2>
+<ul>
+<li><b>Train / validate:</b> 6,000 EuroSAT RGB patches (3,000 forest, 3,000 residential, 64×64), stratified 80/20 split drawn per seed.</li>
+<li><b>Out of distribution:</b> 120 AID images resized to 64×64: 60 forest, 30 dense residential, 30 medium residential. Never used for training or checkpoint selection.</li>
+<li><b>Models</b> (the course notebooks' architectures): a 24k-parameter single-task CNN; a 193k-parameter hard-sharing network (shared encoder, classification head, decoder) trained on α·CE + (1 − α)·MSE; a 360k-parameter soft-sharing network (two branches tied by an alignment loss, masked-autoencoder reconstruction on inputs with 30% of pixels zeroed).</li>
+<li><b>Controls:</b> the hard-sharing network with α = 1 (same architecture, reconstruction switched off) separates the auxiliary loss from the larger model; the single-task CNN trained on the same 30%-masked inputs separates soft sharing from its input masking.</li>
+<li><b>Protocol:</b> 10 epochs of Adam (lr 10⁻³, batch 32), checkpoint with the lowest validation loss, 10 seeds for the headline variants and 5 for the rest of the α sweep. Differences are paired by seed (same split) with a t interval.</li>
+</ul>
+
+<h2>In distribution everything is perfect; on AID nothing is</h2>
+<div id="seeds" class="chart"></div>
+<p class="caption">One dot per seed, clean inputs. Hover for values. The validation split cannot rank the models; the AID set can, barely.</p>
+<div class="table"><table><thead><tr><th>variant</th><th>parameters</th><th>seeds</th><th>EuroSAT val acc</th><th>AID acc [95% CI]</th><th>AID AUROC</th><th>AID forest acc</th><th>val recon MSE</th></tr></thead><tbody><tr><td>Single-task CNN</td><td>23,714</td><td>10</td><td>99.96%</td><td>69.3% [67.5%, 71.1%]</td><td>0.823</td><td>39.7%</td><td>–</td></tr><tr><td>Hard sharing, α=1.0</td><td>193,221</td><td>10</td><td>100.00%</td><td>66.2% [63.2%, 69.1%]</td><td>0.757</td><td>49.8%</td><td>–</td></tr><tr><td>Hard sharing, α=0.8</td><td>193,221</td><td>5</td><td>100.00%</td><td>68.5% [64.1%, 72.9%]</td><td>0.767</td><td>56.0%</td><td>0.0064</td></tr><tr><td>Hard sharing, α=0.6</td><td>193,221</td><td>10</td><td>99.99%</td><td>70.0% [67.1%, 72.9%]</td><td>0.770</td><td>54.7%</td><td>0.0060</td></tr><tr><td>Hard sharing, α=0.4</td><td>193,221</td><td>5</td><td>99.98%</td><td>69.8% [63.4%, 76.3%]</td><td>0.776</td><td>56.0%</td><td>0.0053</td></tr><tr><td>Hard sharing, α=0.2</td><td>193,221</td><td>5</td><td>100.00%</td><td>69.5% [64.3%, 74.7%]</td><td>0.787</td><td>54.7%</td><td>0.0049</td></tr><tr><td>Soft sharing</td><td>359,813</td><td>10</td><td>60.73%</td><td>57.3% [52.0%, 62.7%]</td><td>0.744</td><td>19.8%</td><td>0.0170</td></tr><tr><td>Single-task CNN, masked inputs</td><td>23,714</td><td>10</td><td>94.74%</td><td>74.3% [72.9%, 75.8%]</td><td>0.784</td><td>73.8%</td><td>–</td></tr></tbody></table></div>
+<p class="caption">All rows on clean inputs. The two masked-input models are scored on masked images, as trained, in the last section.</p>
+<p>The reconstruction loss does move AID accuracy when the architecture is held fixed:
+<b>+3.8 pp [+0.7, +6.9]</b> (p = 0.02). But the larger architecture on its own costs -3.2 pp [-5.8, -0.5] (p = 0.02) against the small
+single-task CNN, so the net result of the course project's comparison, hard-sharing MTL against the
+CNN, is <b>+0.7 pp [-2.9, +4.2]</b> (p = 0.68). On ranking quality MTL is worse: AUROC
+-0.053 [-0.086, -0.020] (p = 0.005).</p>
+
+<h2>Where the errors are</h2>
+<figure><img src="figures/per_group.png" alt="Accuracy per AID group and model"></figure>
+<p>The single-task CNN gets every AID residential group at least 98% right but only 40% of
+AID forests. Hard-sharing MTL recovers forests (55%) and pays for them on medium-density
+residential scenes (77%): it trades one error for another rather than seeing the new
+sensor better. AUROC (0.82 CNN, 0.77 MTL) is well above what the accuracy suggests:
+many forests get a lower residential score than the residential images, but still above 0.5.</p>
+<figure><img src="figures/scores.png" alt="Predicted probability of residential on AID images"></figure>
+<figure><img src="figures/shift.png" alt="EuroSAT and AID example images"></figure>
+<p class="caption">At 64×64, a Sentinel-2 forest is a smooth green field; a 600×600 Google Earth forest,
+shrunk to the same size, shows crowns, shadows and clearings. Edge strength (mean grey-level step between
+neighbouring pixels): EuroSAT forest 1.9, AID forest 7.1, EuroSAT residential
+11.1, AID residential 11.7. On this texture measure an AID forest sits between the two training classes.</p>
+
+<h2>A single run cannot settle it</h2>
+<div id="epochs" class="chart"></div>
+<p class="caption">AID accuracy after every epoch, one line per seed, while EuroSAT validation accuracy sits near 100%.</p>
+<p>Across epochs 3 to 10 of a typical run, AID accuracy spans 16 points (CNN) and 15
+points (MTL) while validation accuracy barely moves, so the checkpoint rule cannot see it. Across seeds,
+the CNN ranges 65%–73% on AID, hard-sharing MTL 63%–78% and soft sharing on clean inputs
+50%–74%. The original notebook's single-seed numbers, 73.3% (CNN), 58.3% (MTL) and 50.8%
+(soft sharing), are draws from these distributions, not a ranking.</p>
+
+<h2>Turning the reconstruction weight up does not help either</h2>
+<div id="alpha" class="chart"></div>
+<p class="caption">Mean and 95% CI across seeds; dashed lines are the single-task CNN.</p>
+<figure><img src="figures/alpha_sweep.png" alt="AID accuracy and reconstruction error across the alpha sweep"></figure>
+<figure><img src="figures/reconstructions.png" alt="Reconstructions of EuroSAT and AID images"></figure>
+
+<h2>Soft sharing: the gain is the masking</h2>
+<p>The soft-sharing network only ever sees images with 30% of their pixels zeroed. Scored on clean
+EuroSAT images it reaches 60.7% (99.8% on masked ones) and on clean AID images
+57.3% [52.0%, 62.7%]: the notebook's collapse to 50.8% came from scoring a masked-input model on unmasked
+images. Scored as trained, it reaches 73.3% [69.5%, 77.1%] on AID, +4.0 pp [+0.7, +7.3] above the single-task CNN.</p>
+<p>The masking ablation explains that gain. The single-task CNN trained and scored on the same masked
+inputs reaches 71.9% [70.7%, 73.2%] (+2.6 pp [+0.8, +4.3] against the plain CNN, p = 0.008); soft sharing adds
++1.4 pp [-2.3, +5.2] on top (p = 0.41). Its AUROC is higher, 0.89 against
+0.81 (+0.078 [+0.056, +0.100], p < 0.001), but with 15× more parameters the
+comparison cannot credit the reconstruction for it. Used as plain augmentation, masking helps most:
+the masked-input CNN scored on clean AID images reaches 74.3% [72.9%, 75.8%] (+5.0 pp [+1.9, +8.1] against the
+plain CNN, p = 0.005; forest 74%), at the price of 94.7% on clean EuroSAT validation.</p>
+
+<h2>Limitations</h2>
+<ul>
+<li>The AID set is small: 60 forest images, so one image is 1.7 points of forest accuracy. Confidence intervals are across seeds and do not include the sampling error of the test set itself.</li>
+<li>14 paired comparisons are reported, without a multiple-testing correction. At the Bonferroni threshold (p &lt; 0.0036) 3 stay significant: soft sharing vs CNN (AUROC); soft sharing vs masked-input CNN (AUROC); masked-input CNN, clean scoring, vs CNN (AID-forest accuracy). Effects with p between that threshold and 0.05 are suggestive, not established.</li>
+<li>One architecture family, 10 epochs, no data augmentation beyond the masking ablation, no tuning of α beyond the sweep, the soft-sharing loss weights as set in the notebook.</li>
+<li>Training ran on an Apple GPU (MPS), which is not bit-for-bit deterministic; re-runs reproduce the distributions, not every digit.</li>
+<li>Untested here and more likely to help: colour and scale augmentation, a handful of labelled AID images, domain adaptation.</li>
+</ul>
+
+<footer>Built by <a href="https://github.com/Pchambet">Pierre Chambet</a> — decision science for operations under uncertainty. Course project (M2 Data Science, Télécom SudParis, 2025–2026) with Mahouna Vayssières, Alexi and Houssem. Source and reproduction: <a href="https://github.com/Pchambet/MTL_Classification_Reconstruction">github.com/Pchambet/MTL_Classification_Reconstruction</a>.</footer>
+</main>
+<script>
+(function () {
+  const css = getComputedStyle(document.documentElement);
+  const v = (name) => css.getPropertyValue(name).trim();
+  const swap = { "#0d9488": v("--teal"), "#d97706": v("--amber"), "#64748b": v("--slate") };
+  const recolour = (traces) => traces.map((t) => {
+    if (t.line && t.line.color) t.line.color = swap[t.line.color] || t.line.color;
+    if (t.marker && t.marker.color) t.marker.color = swap[t.marker.color] || t.marker.color;
+    if (t.error_y) t.error_y.color = t.line ? t.line.color : v("--ink");
+    return t;
+  });
+  const axis = (extra) => Object.assign({ gridcolor: v("--rule"), linecolor: v("--rule"), zeroline: false, fixedrange: true }, extra);
+  const layout = (extra) => Object.assign({
+    paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+    font: { family: "Inter, system-ui, sans-serif", color: v("--ink"), size: 12 },
+    margin: { l: 56, r: 16, t: 16, b: 56 },
+    legend: { orientation: "h", y: -0.2, font: { size: 11 } },
+    xaxis: axis({}),
+    yaxis: axis({ tickformat: ".0%" }),
+    hoverlabel: { font: { family: "Inter, system-ui, sans-serif" } },
+  }, extra);
+  const config = { displayModeBar: false, responsive: true };
+  Plotly.newPlot("seeds", recolour([{"type": "box", "name": "EuroSAT validation", "x": ["Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)"], "y": [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9991666666666666, 0.9991666666666666, 0.9991666666666666, 0.9983333333333333, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.9991666666666666, 1.0, 0.7275, 0.5008333333333334, 0.5183333333333333, 0.5, 0.5033333333333333, 0.5033333333333333, 0.5, 0.9958333333333333, 0.5016666666666667, 0.8216666666666667], "text": ["seed 0", "seed 1", "seed 2", "seed 3", "seed 4", "seed 5", "seed 6", "seed 7", "seed 8", "seed 9", "seed 0", "seed 1", "seed 2", "seed 3", "seed 4", "seed 5", "seed 6", "seed 7", "seed 8", "seed 9", "seed 0", "seed 1", "seed 2", "seed 3", "seed 4", "seed 5", "seed 6", "seed 7", "seed 8", "seed 9", "seed 0", "seed 1", "seed 2", "seed 3", "seed 4", "seed 5", "seed 6", "seed 7", "seed 8", "seed 9"], "boxpoints": "all", "jitter": 0.5, "pointpos": 0, "marker": {"color": "#64748b", "size": 6, "opacity": 0.7}, "line": {"color": "#64748b", "width": 1.5}, "fillcolor": "rgba(0,0,0,0)", "hovertemplate": "%{x}<br>%{text}: %{y:.1%}<extra>EuroSAT validation</extra>"}, {"type": "box", "name": "AID", "x": ["Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Single-task CNN", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 1 (no recon.)", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Hard sharing \u03b1 = 0.6", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)", "Soft sharing (clean inputs)"], "y": [0.65, 0.675, 0.7333333333333333, 0.675, 0.675, 0.7166666666666667, 0.7, 0.7166666666666667, 0.7, 0.6916666666666667, 0.6333333333333333, 0.65, 0.6916666666666667, 0.6166666666666667, 0.675, 0.6166666666666667, 0.6666666666666666, 0.7583333333333333, 0.65, 0.6583333333333333, 0.775, 0.7, 0.7166666666666667, 0.6333333333333333, 0.7083333333333334, 0.6916666666666667, 0.6666666666666666, 0.75, 0.6833333333333333, 0.675, 0.575, 0.5, 0.625, 0.5, 0.575, 0.5, 0.5416666666666666, 0.7416666666666667, 0.5583333333333333, 0.6166666666666667], "text": ["seed 0", "seed 1", "seed 2", "seed 3", "seed 4", "seed 5", "seed 6", "seed 7", "seed 8", "seed 9", "seed 0", "seed 1", "seed 2", "seed 3", "seed 4", "seed 5", "seed 6", "seed 7", "seed 8", "seed 9", "seed 0", "seed 1", "seed 2", "seed 3", "seed 4", "seed 5", "seed 6", "seed 7", "seed 8", "seed 9", "seed 0", "seed 1", "seed 2", "seed 3", "seed 4", "seed 5", "seed 6", "seed 7", "seed 8", "seed 9"], "boxpoints": "all", "jitter": 0.5, "pointpos": 0, "marker": {"color": "#0d9488", "size": 6, "opacity": 0.7}, "line": {"color": "#0d9488", "width": 1.5}, "fillcolor": "rgba(0,0,0,0)", "hovertemplate": "%{x}<br>%{text}: %{y:.1%}<extra>AID</extra>"}]), layout({ boxmode: "group",
+    yaxis: axis({ tickformat: ".0%", range: [0.4, 1.03], title: { text: "accuracy" } }) }), config);
+  Plotly.newPlot("epochs", recolour([{"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": true, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.7083333333333334, 0.5166666666666667, 0.6833333333333333, 0.7416666666666667, 0.7083333333333334, 0.7916666666666666, 0.6583333333333333, 0.7, 0.65, 0.7333333333333333], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 0<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.7916666666666666, 0.65, 0.5666666666666667, 0.7333333333333333, 0.7083333333333334, 0.6333333333333333, 0.675, 0.65, 0.7083333333333334, 0.7833333333333333], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 1<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.5416666666666666, 0.6916666666666667, 0.7083333333333334, 0.7083333333333334, 0.75, 0.725, 0.725, 0.7333333333333333, 0.675, 0.6916666666666667], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 2<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.6833333333333333, 0.6666666666666666, 0.775, 0.75, 0.7, 0.7, 0.7583333333333333, 0.7166666666666667, 0.6, 0.675], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 3<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.7083333333333334, 0.775, 0.75, 0.6333333333333333, 0.7416666666666667, 0.6333333333333333, 0.7166666666666667, 0.7083333333333334, 0.65, 0.675], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 4<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.7333333333333333, 0.7416666666666667, 0.6833333333333333, 0.675, 0.6666666666666666, 0.7, 0.675, 0.7583333333333333, 0.7166666666666667, 0.7583333333333333], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 5<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.725, 0.7416666666666667, 0.7, 0.6916666666666667, 0.6416666666666667, 0.7, 0.5416666666666666, 0.625, 0.6583333333333333, 0.7166666666666667], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 6<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.675, 0.7083333333333334, 0.7166666666666667, 0.7583333333333333, 0.7, 0.5666666666666667, 0.6916666666666667, 0.6916666666666667, 0.6666666666666666, 0.7166666666666667], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 7<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.7666666666666667, 0.6166666666666667, 0.5416666666666666, 0.6166666666666667, 0.6916666666666667, 0.5916666666666667, 0.7833333333333333, 0.5083333333333333, 0.6916666666666667, 0.7], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 8<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Single-task CNN", "legendgroup": "cnn", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.7083333333333334, 0.6083333333333333, 0.6916666666666667, 0.7083333333333334, 0.7, 0.75, 0.7166666666666667, 0.7083333333333334, 0.6916666666666667, 0.725], "line": {"color": "#64748b", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Single-task CNN, seed 9<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": true, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.7416666666666667, 0.675, 0.6416666666666667, 0.7, 0.7083333333333334, 0.6333333333333333, 0.5916666666666667, 0.6666666666666666, 0.775, 0.675], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 0<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.6666666666666666, 0.725, 0.5916666666666667, 0.675, 0.6916666666666667, 0.7333333333333333, 0.725, 0.7333333333333333, 0.6583333333333333, 0.7], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 1<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.5666666666666667, 0.5083333333333333, 0.6583333333333333, 0.65, 0.5916666666666667, 0.7083333333333334, 0.6583333333333333, 0.6166666666666667, 0.6916666666666667, 0.7166666666666667], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 2<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.6, 0.7, 0.6166666666666667, 0.525, 0.6166666666666667, 0.65, 0.6666666666666666, 0.75, 0.675, 0.6333333333333333], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 3<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.6666666666666666, 0.6333333333333333, 0.65, 0.7, 0.5833333333333334, 0.7083333333333334, 0.6333333333333333, 0.625, 0.7333333333333333, 0.7083333333333334], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 4<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.6083333333333333, 0.65, 0.6, 0.625, 0.7, 0.6333333333333333, 0.6916666666666667, 0.6666666666666666, 0.5833333333333334, 0.6416666666666667], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 5<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.675, 0.6916666666666667, 0.6333333333333333, 0.7333333333333333, 0.75, 0.7583333333333333, 0.7666666666666667, 0.6666666666666666, 0.65, 0.48333333333333334], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 6<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.6666666666666666, 0.6666666666666666, 0.6833333333333333, 0.6583333333333333, 0.7416666666666667, 0.625, 0.7166666666666667, 0.6916666666666667, 0.7583333333333333, 0.75], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 7<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.675, 0.7166666666666667, 0.65, 0.575, 0.6583333333333333, 0.65, 0.6666666666666666, 0.65, 0.6833333333333333, 0.5833333333333334], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 8<br>epoch %{x}: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines", "name": "Hard sharing \u03b1 = 0.6", "legendgroup": "hard_a0.6", "showlegend": false, "x": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], "y": [0.6833333333333333, 0.65, 0.65, 0.6916666666666667, 0.5583333333333333, 0.675, 0.625, 0.6, 0.675, 0.48333333333333334], "line": {"color": "#0d9488", "width": 1.2}, "opacity": 0.6, "hovertemplate": "Hard sharing \u03b1 = 0.6, seed 9<br>epoch %{x}: %{y:.1%}<extra></extra>"}]), layout({
+    xaxis: axis({ title: { text: "epoch" }, dtick: 1 }),
+    yaxis: axis({ tickformat: ".0%", title: { text: "AID accuracy" } }) }), config);
+  Plotly.newPlot("alpha", recolour([{"type": "scatter", "mode": "lines+markers", "name": "AID, all images", "x": [1.0, 0.8, 0.6, 0.4, 0.2], "y": [0.6616666666666667, 0.6850000000000002, 0.7, 0.6983333333333333, 0.6950000000000001], "error_y": {"type": "data", "symmetric": false, "array": [0.02976676916836052, 0.04414266377383946, 0.029204323393404286, 0.06436923169822695, 0.05204549022263982], "arrayminus": [0.02976676916836052, 0.04414266377383946, 0.029204323393404286, 0.06436923169822695, 0.05204549022263982], "thickness": 1, "width": 3}, "line": {"color": "#0d9488", "width": 2}, "marker": {"color": "#0d9488", "size": 7}, "hovertemplate": "\u03b1 = %{x}<br>%{y:.1%}<extra>AID, all images</extra>"}, {"type": "scatter", "mode": "lines", "name": "single-task CNN (AID, all images)", "x": [0.2, 1.0], "y": [0.6933333333333332, 0.6933333333333332], "line": {"color": "#0d9488", "width": 1, "dash": "dash"}, "hovertemplate": "single-task CNN: %{y:.1%}<extra></extra>"}, {"type": "scatter", "mode": "lines+markers", "name": "AID forest only", "x": [1.0, 0.8, 0.6, 0.4, 0.2], "y": [0.49833333333333335, 0.56, 0.5466666666666667, 0.56, 0.5466666666666666], "error_y": {"type": "data", "symmetric": false, "array": [0.07674435858923317, 0.1030572807471608, 0.06739764316129015, 0.08852753740623909, 0.15719573012641852], "arrayminus": [0.07674435858923317, 0.10305728074716086, 0.0673976431612901, 0.08852753740623909, 0.15719573012641852], "thickness": 1, "width": 3}, "line": {"color": "#d97706", "width": 2}, "marker": {"color": "#d97706", "size": 7}, "hovertemplate": "\u03b1 = %{x}<br>%{y:.1%}<extra>AID forest only</extra>"}, {"type": "scatter", "mode": "lines", "name": "single-task CNN (AID forest only)", "x": [0.2, 1.0], "y": [0.39666666666666667, 0.39666666666666667], "line": {"color": "#d97706", "width": 1, "dash": "dash"}, "hovertemplate": "single-task CNN: %{y:.1%}<extra></extra>"}]), layout({
+    xaxis: axis({ title: { text: "α (weight on classification)" }, autorange: "reversed" }),
+    yaxis: axis({ tickformat: ".0%", title: { text: "AID accuracy" } }) }), config);
+})();
+</script>
+</body>
+</html>
