@@ -140,13 +140,22 @@ def alpha_sweep(rows: list[dict], out: Path) -> Path:
     ax.set_xlabel("α (weight on classification; 1 − α on reconstruction)")
     ax.set_ylabel("out-of-distribution accuracy")
     _pct(ax)
-    ax.set_title("More weight on reconstruction does not move AID accuracy", fontsize=11)
-    mse = [s[n].get("val_recon_mse", {}).get("mean", np.nan) for n in names]
-    ax2.plot(alphas, mse, "-o", color=SLATE, ms=4, lw=2)
+    first, last = s[names[0]]["ood_acc"]["mean"], s[names[-1]]["ood_acc"]["mean"]
+    ax.set_title(
+        f"AID accuracy, α = {alphas[0]:g} → {alphas[-1]:g}: {first:.1%} → {last:.1%}", fontsize=11
+    )
+    # alpha = 1 trains no decoder: its reconstruction error is meaningless and left out.
+    rec_alphas = [a for a in alphas if a < 1]
+    mse = [s[f"hard_a{a:.1f}"]["val_recon_mse"]["mean"] for a in rec_alphas]
+    ax2.plot(rec_alphas, mse, "-o", color=SLATE, ms=4, lw=2)
     ax2.set_xlim(alphas[0] + 0.05, alphas[-1] - 0.05)
     ax2.set_xlabel("α")
     ax2.set_ylabel("validation reconstruction MSE\n(pixels in [−1, 1])")
-    ax2.set_title("…although reconstructions do improve", fontsize=11)
+    ax2.set_title(
+        f"Reconstruction MSE, α = {rec_alphas[0]:g} → {rec_alphas[-1]:g}:"
+        f" {mse[0]:.4f} → {mse[-1]:.4f}",
+        fontsize=11,
+    )
     fig.tight_layout()
     return _save(fig, "alpha_sweep.png", out)
 
@@ -174,9 +183,11 @@ def per_group(rows: list[dict], out: Path) -> Path:
     _pct(ax)
     ax.set_ylabel("accuracy (mean, 95% CI)")
     ax.legend(ncol=4, fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.18))
-    forest = s["cnn"]["ood_acc_Forest"]["mean"]
+    forest = [s[n]["ood_acc_Forest"]["mean"] for n in names]
+    resid = [s[n][f"ood_acc_{g}"]["mean"] for n in names for g in list(GROUPS)[1:]]
     ax.set_title(
-        f"Every error is an AID forest called residential (single-task CNN: {forest:.0%} of forests right)",
+        f"AID residential scenes: ≥ {min(resid):.0%} right; AID forests:"
+        f" {min(forest):.0%}–{max(forest):.0%} right",
         fontsize=11,
     )
     return _save(fig, "per_group.png", out)
@@ -256,7 +267,7 @@ def reconstructions(npz: Path, out: Path, variant: str = "hard_a0.6") -> Path:
                 sp.set_visible(False)
         axes[r, 0].set_ylabel(label, rotation=0, ha="right", va="center", fontsize=9)
     fig.suptitle(
-        "The decoder learns a blurred EuroSAT look and carries it over to AID images",
+        f"Reconstructions, {variant.replace('hard_a', 'hard sharing α = ')}, seed 0",
         x=0.01,
         ha="left",
         fontsize=11,

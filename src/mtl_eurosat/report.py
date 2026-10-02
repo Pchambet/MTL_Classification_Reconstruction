@@ -147,7 +147,8 @@ def table(header: list[str], rows: list[list[str]]) -> str:
 def results_table(summary: list[dict]) -> str:
     rows = []
     for line in summary:
-        rec = line.get("val_recon_mse")
+        # alpha = 1 trains no decoder, so its reconstruction error means nothing.
+        rec = None if line["variant"] == "hard_a1.0" else line.get("val_recon_mse")
         rows.append(
             [
                 line["label"],
