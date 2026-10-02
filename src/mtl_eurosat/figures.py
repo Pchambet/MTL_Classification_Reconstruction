@@ -79,14 +79,18 @@ def _strip(ax, x: float, values: np.ndarray, colour: str, width: float = 0.12) -
         ax.plot([x, x], [lo, hi], color=colour, lw=1.2, zorder=4)
 
 
-# (variant, validation metric, AID metric, label)
+# (variant, validation metric, AID metric, label). The first columns score every model on
+# the inputs it was trained on; the last ones score the two masked-input models on clean images.
 HERO = (
     ("cnn", "val_acc", "ood_acc", SHORT["cnn"]),
     ("hard_a1.0", "val_acc", "ood_acc", SHORT["hard_a1.0"]),
     ("hard_a0.6", "val_acc", "ood_acc", SHORT["hard_a0.6"]),
-    ("soft", "val_acc", "ood_acc", "Soft sharing\nclean inputs"),
-    ("soft", "val_acc_masked", "ood_acc_masked", "Soft sharing\nmasked inputs"),
-    ("cnn_masked", "val_acc_masked", "ood_acc_masked", "Single-task CNN\nmasked inputs"),
+    ("soft", "val_acc_masked", "ood_acc_masked", "Soft sharing\n(masked inputs)"),
+    ("cnn_masked", "val_acc_masked", "ood_acc_masked", "Single-task CNN\n(masked inputs)"),
+)
+HERO_CLEAN = (
+    ("soft", "val_acc", "ood_acc", "Soft sharing"),
+    ("cnn_masked", "val_acc", "ood_acc", "Single-task CNN,\nmasked training"),
 )
 
 
@@ -95,8 +99,23 @@ def hero(rows: list[dict], out: Path, title: str) -> Path:
     nb = analysis.notebook_run()
     notebook = {("cnn", "ood_acc"): nb["baseline"], ("hard_a0.6", "ood_acc"): nb["mtl"]}
     notebook[("soft", "ood_acc")] = nb["softshare"]
-    cols = [c for c in HERO if any(r["variant"] == c[0] for r in rows)]
-    fig, ax = plt.subplots(figsize=(11, 4.8))
+    run = {r["variant"] for r in rows}
+    cols = [c for c in HERO if c[0] in run]
+    clean = [c for c in HERO_CLEAN if c[0] in run]
+    split = len(cols) - 0.5
+    cols += clean
+    fig, ax = plt.subplots(figsize=(12, 4.8))
+    if clean:  # not as trained: set apart so the title's "scored as trained" stays true
+        ax.axvspan(split, len(cols) - 0.4, color="#f8fafc", zorder=0)
+        ax.axvline(split, color=GRID, lw=1)
+        ax.text(
+            (split + len(cols) - 1) / 2,
+            1.015,
+            "masked-input models on clean inputs (not as trained)",
+            color=SLATE,
+            fontsize=8.5,
+            ha="center",
+        )
     for i, (name, val_key, ood_key, _) in enumerate(cols):
         _strip(ax, i - 0.2, analysis.column(rows, name, val_key), SLATE)
         _strip(ax, i + 0.2, analysis.column(rows, name, ood_key), TEAL)
@@ -105,14 +124,16 @@ def hero(rows: list[dict], out: Path, title: str) -> Path:
     ax.set_xticks(range(len(cols)), [c[3] for c in cols])
     ax.set_ylim(0.4, 1.04)
     ax.axhline(0.5, color=SLATE, lw=0.8, ls=":")
-    ax.text(len(cols) - 0.45, 0.505, "chance", color=SLATE, fontsize=8, ha="right", va="bottom")
+    ax.text(split - 0.05, 0.505, "chance", color=SLATE, fontsize=8, ha="right", va="bottom")
     _pct(ax)
     ax.set_ylabel("accuracy")
     ax.set_xlim(-0.6, len(cols) - 0.4)
     ax.text(-0.2, 1.013, "EuroSAT validation", color=SLATE, fontsize=8.5, ha="center")
     ax.text(0.2, 0.42, "AID, out of distribution", color=TEAL, fontsize=8.5, ha="left")
-    ax.scatter([], [], marker="D", s=30, color=AMBER, label="original single-seed notebook run")
-    ax.legend(loc="lower right", fontsize=8.5)
+    ax.scatter(
+        [], [], marker="D", s=30, color=AMBER, label="original notebook run (one seed, last epoch)"
+    )
+    ax.legend(loc="lower left", bbox_to_anchor=(0.3, 0.0), fontsize=8.5)  # clear of the dots
     ax.set_title(title, fontsize=11.5)
     return _save(fig, "hero.png", out)
 
@@ -189,8 +210,8 @@ def per_group(rows: list[dict], out: Path) -> Path:
     forest = [s[n]["ood_acc_Forest"]["mean"] for n in names]
     resid = [s[n][f"ood_acc_{g}"]["mean"] for n in names for g in list(GROUPS)[1:]]
     ax.set_title(
-        f"AID residential scenes: ≥ {min(resid):.0%} right; AID forests:"
-        f" {min(forest):.0%}–{max(forest):.0%} right",
+        f"AID residential scenes: ≥ {min(resid):.1%} right; AID forests:"
+        f" {min(forest):.1%}–{max(forest):.1%} right",
         fontsize=11,
     )
     return _save(fig, "per_group.png", out)
@@ -346,7 +367,7 @@ def hero_title(rows: list[dict], comp: dict) -> str:
     r = analysis.as_trained_range(rows)
     return (
         f"Scored as trained, every model is ≥ {r['val_min']:.1%} right on EuroSAT"
-        f" and {r['ood_lo']:.0%}–{r['ood_hi']:.0%} on AID aerial images.\n"
+        f" and {r['ood_lo']:.1%}–{r['ood_hi']:.1%} on AID aerial images (mean over seeds).\n"
         f"Hard-sharing MTL (α = 0.6) vs single-task CNN on AID: {effect_phrase(comp['mtl_vs_cnn'])}"
     )
 
