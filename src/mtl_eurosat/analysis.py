@@ -81,11 +81,13 @@ def summary(rows: list[dict]) -> list[dict]:
 def comparisons(rows: list[dict]) -> dict[str, dict]:
     """Paired (same seed = same split) differences in OOD accuracy for the questions asked."""
 
-    def paired(a: str, b: str, key: str = "ood_acc") -> dict:
+    def paired(a: str, b: str, key: str = "ood_acc", key_a: str | None = None) -> dict:
         seeds = sorted(
             set(column(rows, a, "seed").astype(int)) & set(column(rows, b, "seed").astype(int))
         )
-        va = np.array([_get(rows, a, s, key) for s in seeds])
+        if not seeds:  # a variant that was not run
+            return {}
+        va = np.array([_get(rows, a, s, key_a or key) for s in seeds])
         vb = np.array([_get(rows, b, s, key) for s in seeds])
         return {**metrics.paired_difference(va, vb), "n": len(seeds)}
 
@@ -93,15 +95,26 @@ def comparisons(rows: list[dict]) -> dict[str, dict]:
         # Effect of the auxiliary loss, architecture held fixed.
         "aux_loss": paired("hard_a0.6", "hard_a1.0"),
         "aux_loss_forest": paired("hard_a0.6", "hard_a1.0", "ood_acc_Forest"),
+        "aux_loss_auroc": paired("hard_a0.6", "hard_a1.0", "ood_auroc"),
         # What the course project compared: MTL against the small single-task CNN.
         "mtl_vs_cnn": paired("hard_a0.6", "cnn"),
+        "mtl_vs_cnn_auroc": paired("hard_a0.6", "cnn", "ood_auroc"),
         # Effect of the architecture alone, no reconstruction.
         "arch": paired("hard_a1.0", "cnn"),
+        # Soft sharing scored as trained (masked inputs) vs the plain CNN ...
+        "soft_masked_vs_cnn": paired("soft", "cnn", key_a="ood_acc_masked"),
+        "soft_masked_vs_cnn_auroc": paired("soft", "cnn", "ood_auroc", key_a="ood_auroc_masked"),
+        # ... and the same masking without any reconstruction.
+        "cnn_masked_vs_cnn": paired("cnn_masked", "cnn", key_a="ood_acc_masked"),
+        "cnn_masked_vs_cnn_auroc": paired(
+            "cnn_masked", "cnn", "ood_auroc", key_a="ood_auroc_masked"
+        ),
+        "soft_masked_vs_cnn_masked": paired("soft", "cnn_masked", "ood_acc_masked"),
     }
 
 
 def _get(rows: list[dict], variant: str, seed: int, key: str) -> float:
-    return next(r[key] for r in rows if r["variant"] == variant and r["seed"] == seed)
+    return next(r.get(key, np.nan) for r in rows if r["variant"] == variant and r["seed"] == seed)
 
 
 def edge_strength(x: np.ndarray) -> float:

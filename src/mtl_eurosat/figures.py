@@ -86,6 +86,7 @@ HERO = (
     ("hard_a0.6", "val_acc", "ood_acc", SHORT["hard_a0.6"]),
     ("soft", "val_acc", "ood_acc", "Soft sharing\nclean inputs"),
     ("soft", "val_acc_masked", "ood_acc_masked", "Soft sharing\nmasked inputs"),
+    ("cnn_masked", "val_acc_masked", "ood_acc_masked", "Single-task CNN\nmasked inputs"),
 )
 
 
@@ -95,7 +96,7 @@ def hero(rows: list[dict], out: Path, title: str) -> Path:
     notebook = {("cnn", "ood_acc"): nb["baseline"], ("hard_a0.6", "ood_acc"): nb["mtl"]}
     notebook[("soft", "ood_acc")] = nb["softshare"]
     cols = [c for c in HERO if any(r["variant"] == c[0] for r in rows)]
-    fig, ax = plt.subplots(figsize=(10, 4.8))
+    fig, ax = plt.subplots(figsize=(11, 4.8))
     for i, (name, val_key, ood_key, _) in enumerate(cols):
         _strip(ax, i - 0.2, analysis.column(rows, name, val_key), SLATE)
         _strip(ax, i + 0.2, analysis.column(rows, name, ood_key), TEAL)

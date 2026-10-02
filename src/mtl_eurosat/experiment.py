@@ -38,9 +38,15 @@ VARIANTS: dict[str, Variant] = {
         "soft", "soft", alpha=0.5, beta=0.005, gamma=0.01, mask_ratio=0.3, label="Soft sharing"
     ),
 }
+# Masking ablation: the single-task CNN trained and scored on the soft-sharing model's
+# masked inputs, without any reconstruction. It tells whether a soft-sharing gain comes
+# from the auxiliary task or from the input masking.
+VARIANTS["cnn_masked"] = Variant(
+    "cnn_masked", "cnn", mask_ratio=0.3, label="Single-task CNN, masked inputs"
+)
 # The comparison that answers the question gets the full set of seeds; the alpha sweep
 # around it gets half, which is enough to see a trend and halves the compute.
-HEADLINE = ("cnn", _alpha_name(1.0), _alpha_name(0.6), "soft")
+HEADLINE = ("cnn", _alpha_name(1.0), _alpha_name(0.6), "soft", "cnn_masked")
 
 
 def seeds_for(name: str) -> tuple[int, ...]:

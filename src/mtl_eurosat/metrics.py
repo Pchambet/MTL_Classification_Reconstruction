@@ -55,5 +55,6 @@ def paired_difference(a: np.ndarray, b: np.ndarray) -> dict[str, float]:
     """
     d = np.asarray(a, dtype=float) - np.asarray(b, dtype=float)
     m, lo, hi = mean_ci(d)
-    p = float(stats.ttest_rel(a, b).pvalue) if np.any(d != 0) else 1.0
-    return {"mean": m, "lo": lo, "hi": hi, "p": p}
+    if np.ptp(d) == 0:  # identical differences: the t statistic is 0/0 or infinite
+        return {"mean": m, "lo": lo, "hi": hi, "p": 1.0 if d[0] == 0 else 0.0}
+    return {"mean": m, "lo": lo, "hi": hi, "p": float(stats.ttest_rel(a, b).pvalue)}

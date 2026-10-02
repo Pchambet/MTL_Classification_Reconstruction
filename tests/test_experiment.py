@@ -31,7 +31,7 @@ def _run(variant: str, seed: int, ood_acc: float) -> dict:
         "ood_acc_MediumResidential": 1.0,
     }
     if variant == "soft":
-        summary |= {"val_acc_masked": 1.0, "ood_acc_masked": 0.7}
+        summary |= {"val_acc_masked": 1.0, "ood_acc_masked": 0.7, "ood_auroc_masked": 0.9}
     history = [{"epoch": e, "val_acc": 1.0, "ood_acc": ood_acc} for e in (1, 2)]
     return {"summary": summary, "history": history, "p_ood": [0.6, 0.4, 0.9, 0.8]}
 
