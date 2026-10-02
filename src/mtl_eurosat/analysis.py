@@ -109,8 +109,48 @@ def comparisons(rows: list[dict]) -> dict[str, dict]:
         "cnn_masked_vs_cnn_auroc": paired(
             "cnn_masked", "cnn", "ood_auroc", key_a="ood_auroc_masked"
         ),
+        # Soft sharing against the masked-input CNN: same inputs, only the model differs.
         "soft_masked_vs_cnn_masked": paired("soft", "cnn_masked", "ood_acc_masked"),
+        "soft_masked_vs_cnn_masked_auroc": paired("soft", "cnn_masked", "ood_auroc_masked"),
+        # Masking as plain augmentation: the masked-input CNN scored on clean images.
+        "cnn_masked_clean_vs_cnn": paired("cnn_masked", "cnn"),
+        "cnn_masked_clean_vs_cnn_forest": paired("cnn_masked", "cnn", "ood_acc_Forest"),
     }
+
+
+# Each model scored on the kind of input it was trained on: the masked-input models
+# on masked images, the others on clean ones.
+AS_TRAINED = {"soft": "_masked", "cnn_masked": "_masked"}
+
+
+def as_trained(rows: list[dict], variant: str, key: str) -> np.ndarray:
+    """``key`` (e.g. ``val_acc``) for ``variant``, on the inputs the model was trained on."""
+    return column(rows, variant, key + AS_TRAINED.get(variant, ""))
+
+
+def as_trained_range(rows: list[dict]) -> dict[str, float]:
+    """Worst EuroSAT validation run and the span of AID mean accuracies, every model as trained."""
+    names = [n for n in VARIANTS if any(r["variant"] == n for r in rows)]
+    val = [as_trained(rows, n, "val_acc").min() for n in names]
+    ood = [as_trained(rows, n, "ood_acc").mean() for n in names]
+    return {"val_min": float(min(val)), "ood_lo": float(min(ood)), "ood_hi": float(max(ood))}
+
+
+def epoch_swing(history: list[dict], variant: str, key: str, first_epoch: int = 3) -> float:
+    """Median over seeds of the range (max - min) of ``key`` across epochs >= ``first_epoch``.
+
+    It measures how much a metric moves within one training run once training has settled,
+    i.e. how much the choice of checkpoint alone can change it.
+    """
+    spans = []
+    for seed in sorted({h["seed"] for h in history if h["variant"] == variant}):
+        v = [
+            h[key]
+            for h in history
+            if h["variant"] == variant and h["seed"] == seed and h["epoch"] >= first_epoch
+        ]
+        spans.append(max(v) - min(v))
+    return float(np.median(spans)) if spans else float("nan")
 
 
 def _get(rows: list[dict], variant: str, seed: int, key: str) -> float:

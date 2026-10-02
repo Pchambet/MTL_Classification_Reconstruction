@@ -72,3 +72,24 @@ def test_paired_comparison_recovers_the_planted_effect(results):
     soft = next(v for v in summary["variants"] if v["variant"] == "soft")
     assert soft["ood_acc_masked"]["mean"] == pytest.approx(0.7)
     assert "val_recon_mse" not in summary["variants"][0]  # cnn: metric does not apply
+
+
+def test_epoch_swing_is_the_median_within_run_range():
+    history = [
+        {"variant": "cnn", "seed": seed, "epoch": e, "ood_acc": acc}
+        for seed, accs in ((0, [0.1, 0.6, 0.7, 0.5]), (1, [0.9, 0.6, 0.6, 0.6]), (2, [0, 0, 1, 0]))
+        for e, acc in enumerate(accs, start=1)
+    ]
+    # epochs 3-4 only: ranges 0.2, 0.0 and 1.0, median 0.2; epochs 1-2 are ignored
+    assert analysis.epoch_swing(history, "cnn", "ood_acc") == pytest.approx(0.2)
+    assert np.isnan(analysis.epoch_swing(history, "soft", "ood_acc"))
+
+
+def test_as_trained_scores_masked_models_on_masked_inputs(results):
+    rows = analysis.runs(results)
+    # soft is 0.55 on clean AID images and 0.7 on masked ones, the inputs it was trained on
+    assert analysis.as_trained(rows, "soft", "ood_acc").tolist() == [0.7] * 3
+    r = analysis.as_trained_range(rows)
+    assert r["ood_lo"] == pytest.approx(0.67)  # cnn and hard_a1.0: mean of 0.65, 0.67, 0.69
+    assert r["ood_hi"] == pytest.approx(0.72)  # hard_a0.6: mean of 0.69, 0.72, 0.75
+    assert r["val_min"] == 1.0

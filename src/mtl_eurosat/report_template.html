@@ -41,7 +41,7 @@ a { color: var(--teal); }
 .kpi { background: var(--panel); border: 1px solid var(--rule); border-radius: 10px; padding: 14px 16px; }
 .kpi b { display: block; font-size: 1.5rem; line-height: 1.2; }
 .kpi span { font-size: 0.85rem; color: var(--muted); }
-.chart { width: 100%; height: 420px; margin: 8px 0 4px; }
+.chart { width: 100%; height: 420px; margin: 8px 0 4px; overflow: hidden; }
 .caption { font-size: 0.85rem; color: var(--muted); margin: 0 0 20px; }
 figure { margin: 16px 0 24px; }
 figure img { width: 100%; height: auto; border-radius: 8px; background: #fff; }
@@ -51,90 +51,105 @@ th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--rul
 th { color: var(--muted); font-weight: 600; }
 code { font-size: 0.9em; background: var(--panel); padding: 1px 5px; border-radius: 4px; }
 pre { background: var(--panel); border: 1px solid var(--rule); border-radius: 8px; padding: 12px 14px; overflow-x: auto; }
-footer { margin-top: 56px; font-size: 0.85rem; color: var(--muted); }
+footer { margin-top: 56px; font-size: 0.85rem; color: var(--muted); overflow-wrap: anywhere; }
 </style>
 </head>
 <body>
 <main>
-<p class="meta">Multi-task learning · domain shift · EuroSAT → AID</p>
+<p class="meta">Multi-task learning · domain shift · EuroSAT → AID · $n_seeds seeds</p>
 <h1>Does a reconstruction task make a satellite classifier robust to a new sensor?</h1>
 <p class="lede">A course project claimed that training one encoder to classify <em>and</em> reconstruct
 satellite images makes it generalise better. Re-run over $n_seeds seeds and scored on aerial images
-from a different sensor, the claim does not hold: the auxiliary loss leaves out-of-distribution
-accuracy where it was, and single runs were too noisy to say anything at all.</p>
+from a different sensor, the claim does not hold: hard-sharing MTL lands where a single-task CNN
+already was, and the one gain that does survive comes from masking the inputs, not from reconstructing them.</p>
 
 <div class="kpis">
-  <div class="kpi"><b>≥ $val_min</b><span>EuroSAT validation accuracy, every model and seed: the in-distribution task is saturated</span></div>
-  <div class="kpi"><b>$cnn_ood_mean → $hard06_ood_mean</b><span>AID accuracy, single-task CNN → hard-sharing MTL (α = 0.6), mean of $n_seeds seeds</span></div>
-  <div class="kpi"><b>$aux</b><span>effect of the reconstruction loss with the architecture held fixed (paired, 95% CI)</span></div>
+  <div class="kpi"><b>≥ $val_min</b><span>EuroSAT validation accuracy of every model and seed, scored as trained: the in-distribution task is saturated</span></div>
+  <div class="kpi"><b>$cnn_ood_mean → $hard06_ood_mean</b><span>AID accuracy, single-task CNN → hard-sharing MTL (α = 0.6): $mtl_vs_cnn, $mtl_vs_cnn_p</span></div>
+  <div class="kpi"><b>$masking_clean</b><span>AID accuracy gained by the single-task CNN when trained on masked inputs, no reconstruction at all</span></div>
 </div>
+
+<figure><img src="figures/hero.png" alt="EuroSAT validation and AID accuracy of every model, one dot per seed"></figure>
 
 <h2>The question</h2>
 <p>Train on Sentinel-2 patches of forest and residential land (EuroSAT), deploy on Google Earth aerial
 images of the same two land uses (AID). Classification-only training can latch onto shortcuts of the
 training sensor; a reconstruction head forces the shared encoder to keep the whole image. Does that
 auxiliary task buy robustness to the sensor change? The answer decides whether an auxiliary loss is a
-cheap robustness fix or a distraction from collecting target-domain data.</p>
+cheap robustness fix or a distraction from augmentation and target-domain labels.</p>
 
 <h2>Setup</h2>
 <ul>
 <li><b>Train / validate:</b> 6,000 EuroSAT RGB patches (3,000 forest, 3,000 residential, 64×64), stratified 80/20 split drawn per seed.</li>
-<li><b>Out of distribution:</b> 120 AID images resized to 64×64 — 60 forest, 30 dense residential, 30 medium residential. Never used for training or checkpoint selection.</li>
-<li><b>Models</b> (the course notebooks' architectures, unchanged): a 24k-parameter single-task CNN; a 193k-parameter hard-sharing network (shared encoder, classification head, decoder) trained on α·CE + (1 − α)·MSE; a soft-sharing network (two branches tied by an alignment loss, masked-autoencoder reconstruction).</li>
-<li><b>Control:</b> the hard-sharing network with α = 1 — same architecture, reconstruction switched off — separates the effect of the auxiliary loss from the effect of an 8× larger model.</li>
-<li><b>Protocol:</b> 10 epochs of Adam (lr 10⁻³, batch 32), checkpoint with the lowest validation loss, $n_seeds seeds for the headline variants and $n_seeds_sweep for the rest of the α sweep. Differences are paired by seed (same split).</li>
+<li><b>Out of distribution:</b> 120 AID images resized to 64×64: 60 forest, 30 dense residential, 30 medium residential. Never used for training or checkpoint selection.</li>
+<li><b>Models</b> (the course notebooks' architectures): a $params_cnn-parameter single-task CNN; a $params_hard-parameter hard-sharing network (shared encoder, classification head, decoder) trained on α·CE + (1 − α)·MSE; a $params_soft-parameter soft-sharing network (two branches tied by an alignment loss, masked-autoencoder reconstruction on inputs with 30% of pixels zeroed).</li>
+<li><b>Controls:</b> the hard-sharing network with α = 1 (same architecture, reconstruction switched off) separates the auxiliary loss from the larger model; the single-task CNN trained on the same 30%-masked inputs separates soft sharing from its input masking.</li>
+<li><b>Protocol:</b> 10 epochs of Adam (lr 10⁻³, batch 32), checkpoint with the lowest validation loss, $n_seeds seeds for the headline variants and $n_seeds_sweep for the rest of the α sweep. Differences are paired by seed (same split) with a t interval.</li>
 </ul>
 
 <h2>In distribution everything is perfect; on AID nothing is</h2>
 <div id="seeds" class="chart"></div>
-<p class="caption">One dot per seed. Hover for values. The validation split cannot rank the models; the AID set can, barely.</p>
+<p class="caption">One dot per seed, clean inputs. Hover for values. The validation split cannot rank the models; the AID set can, barely.</p>
 $results_table
-<p>With the architecture held fixed, adding the reconstruction loss changes AID accuracy by
-<b>$aux</b> (paired t-test, $aux_p), and AID-forest accuracy by $aux_forest. Against the small
-single-task CNN — the comparison the course project made — hard-sharing MTL differs by
-$mtl_vs_cnn ($mtl_vs_cnn_p); the larger architecture alone accounts for $arch.</p>
+<p class="caption">All rows on clean inputs. The two masked-input models are scored on masked images, as trained, in the last section.</p>
+<p>The reconstruction loss does move AID accuracy when the architecture is held fixed:
+<b>$aux</b> ($aux_p). But the larger architecture on its own costs $arch ($arch_p) against the small
+single-task CNN, so the net result of the course project's comparison, hard-sharing MTL against the
+CNN, is <b>$mtl_vs_cnn</b> ($mtl_vs_cnn_p). On ranking quality MTL is worse: AUROC
+$mtl_vs_cnn_auroc ($mtl_vs_cnn_auroc_p).</p>
 
-<h2>Every error is a forest called residential</h2>
+<h2>Where the errors are</h2>
 <figure><img src="figures/per_group.png" alt="Accuracy per AID group and model"></figure>
-<p>All models recognise AID residential scenes. The single-task CNN gets $cnn_forest of AID forests
-right, hard-sharing MTL $hard06_forest. The ranking is better than the accuracy suggests (AUROC
-$cnn_auroc and $hard06_auroc): many forests receive a lower residential score than the residential
-images, but still above the 0.5 threshold — a shift of the decision boundary as much as a failure of the features.</p>
+<p>The single-task CNN gets every AID residential group at least $cnn_res_min right but only $cnn_forest of
+AID forests. Hard-sharing MTL recovers forests ($hard06_forest) and pays for them on medium-density
+residential scenes ($hard06_medium): it trades one error for another rather than seeing the new
+sensor better. AUROC ($cnn_auroc CNN, $hard06_auroc MTL) is well above what the accuracy suggests:
+many forests get a lower residential score than the residential images, but still above 0.5.</p>
 <figure><img src="figures/scores.png" alt="Predicted probability of residential on AID images"></figure>
 <figure><img src="figures/shift.png" alt="EuroSAT and AID example images"></figure>
 <p class="caption">At 64×64, a Sentinel-2 forest is a smooth green field; a 600×600 Google Earth forest,
 shrunk to the same size, shows crowns, shadows and clearings. Edge strength (mean grey-level step between
 neighbouring pixels): EuroSAT forest $edge_eu_forest, AID forest $edge_aid_forest, EuroSAT residential
-$edge_eu_res, AID residential $edge_aid_res. On this texture measure, an AID forest sits between the two training classes.</p>
+$edge_eu_res, AID residential $edge_aid_res. On this texture measure an AID forest sits between the two training classes.</p>
 
 <h2>A single run cannot settle it</h2>
 <div id="epochs" class="chart"></div>
-<p class="caption">AID accuracy after every epoch, one line per seed, while EuroSAT validation accuracy sits at ~100%.</p>
-<p>Within one training run, AID accuracy moves by tens of points from one epoch to the next while
-validation accuracy does not move. Across seeds the hard-sharing model ranges $hard06_range on AID and
-the single-task CNN $cnn_range. The original notebook's single-seed numbers — $nb_cnn (CNN), $nb_mtl
-(MTL), $nb_soft (soft sharing) — are draws from these distributions, not a ranking.</p>
+<p class="caption">AID accuracy after every epoch, one line per seed, while EuroSAT validation accuracy sits near 100%.</p>
+<p>Across epochs 3 to 10 of a typical run, AID accuracy spans $swing_cnn points (CNN) and $swing_hard06
+points (MTL) while validation accuracy barely moves, so the checkpoint rule cannot see it. Across seeds,
+the CNN ranges $cnn_range on AID, hard-sharing MTL $hard06_range and soft sharing on clean inputs
+$soft_range. The original notebook's single-seed numbers, $nb_cnn (CNN), $nb_mtl (MTL) and $nb_soft
+(soft sharing), are draws from these distributions, not a ranking.</p>
 
 <h2>Turning the reconstruction weight up does not help either</h2>
 <div id="alpha" class="chart"></div>
 <p class="caption">Mean and 95% CI across seeds; dashed lines are the single-task CNN.</p>
+<figure><img src="figures/alpha_sweep.png" alt="AID accuracy and reconstruction error across the alpha sweep"></figure>
 <figure><img src="figures/reconstructions.png" alt="Reconstructions of EuroSAT and AID images"></figure>
 
-<h2>Soft sharing: a train/test mismatch, not a property of MTL</h2>
-<p>The soft-sharing network is trained only on images with 30% of their pixels masked. Scored on clean
-EuroSAT validation images it reaches $soft_val (vs $soft_val_masked on masked ones), and on clean AID
-images $soft_ood ($soft_ood_masked when masked). Its collapse in the original notebook
-($nb_soft) came from scoring a masked-input model on unmasked images.</p>
+<h2>Soft sharing: the gain is the masking</h2>
+<p>The soft-sharing network only ever sees images with 30% of their pixels zeroed. Scored on clean
+EuroSAT images it reaches $soft_val ($soft_val_masked on masked ones) and on clean AID images
+$soft_ood: the notebook's collapse to $nb_soft came from scoring a masked-input model on unmasked
+images. Scored as trained, it reaches $soft_ood_masked on AID, $soft_vs_cnn above the single-task CNN.</p>
+<p>The masking ablation explains that gain. The single-task CNN trained and scored on the same masked
+inputs reaches $cm_ood_masked ($masking against the plain CNN, $masking_p); soft sharing adds
+$soft_vs_cm on top ($soft_vs_cm_p). Its AUROC is higher, $soft_auroc_masked against
+$cm_auroc_masked ($soft_vs_cm_auroc, $soft_vs_cm_auroc_p), but with $params_ratio× more parameters the
+comparison cannot credit the reconstruction for it. Used as plain augmentation, masking helps most:
+the masked-input CNN scored on clean AID images reaches $cm_ood_clean ($masking_clean against the
+plain CNN, $masking_clean_p; forest $cm_forest_clean), at the price of $cm_val_clean on clean EuroSAT validation.</p>
 
 <h2>Limitations</h2>
 <ul>
 <li>The AID set is small: 60 forest images, so one image is 1.7 points of forest accuracy. Confidence intervals are across seeds and do not include the sampling error of the test set itself.</li>
-<li>One architecture family, 10 epochs, no data augmentation, no tuning of α beyond the sweep, the soft-sharing weights as set in the notebook.</li>
+<li>$n_comparisons paired comparisons are reported, without a multiple-testing correction. At the Bonferroni threshold (p &lt; $bonferroni) $n_bonferroni stay significant: $bonferroni_list. Effects with p between that threshold and 0.05 are suggestive, not established.</li>
+<li>One architecture family, 10 epochs, no data augmentation beyond the masking ablation, no tuning of α beyond the sweep, the soft-sharing loss weights as set in the notebook.</li>
 <li>Training ran on an Apple GPU (MPS), which is not bit-for-bit deterministic; re-runs reproduce the distributions, not every digit.</li>
-<li>Untested here and more likely to help: colour/scale augmentation, a handful of labelled AID images, domain adaptation.</li>
+<li>Untested here and more likely to help: colour and scale augmentation, a handful of labelled AID images, domain adaptation.</li>
 </ul>
 
-<footer>Built by <a href="https://github.com/Pchambet">Pierre Chambet</a> — decision science for operations under uncertainty. Course project with Mahouna Vayssières, Alexi and Houssem (Télécom SudParis). Source and reproduction: <a href="https://github.com/Pchambet/MTL_Classification_Reconstruction">github.com/Pchambet/MTL_Classification_Reconstruction</a>.</footer>
+<footer>Built by <a href="https://github.com/Pchambet">Pierre Chambet</a> — decision science for operations under uncertainty. Course project (M2 Data Science, Télécom SudParis, 2025–2026) with Mahouna Vayssières, Alexi and Houssem. Source and reproduction: <a href="https://github.com/Pchambet/MTL_Classification_Reconstruction">github.com/Pchambet/MTL_Classification_Reconstruction</a>.</footer>
 </main>
 <script>
 (function () {

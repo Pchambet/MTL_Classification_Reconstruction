@@ -15,7 +15,7 @@ SHORT = {
     "cnn": "Single-task\nCNN",
     "hard_a1.0": "Hard sharing\nα = 1 (no recon.)",
     "hard_a0.6": "Hard sharing\nα = 0.6",
-    "soft": "Soft sharing",
+    "soft": "Soft sharing\n(clean inputs)",
 }
 GROUPS = {
     "Forest": "AID forest",
@@ -133,23 +133,25 @@ def alpha_sweep(rows: list[dict], out: Path) -> Path:
         ax.plot(alphas, m, "-o", color=colour, ms=4, lw=2)
         ax.text(alphas[-1] - 0.02, m[-1], label, color=colour, fontsize=8.5, va="center")
         base = s["cnn"][key]["mean"]
-        ax.axhline(base, color=colour, lw=1, ls="--", alpha=0.7)
-    ax.text(
-        alphas[0], s["cnn"]["ood_acc"]["mean"] + 0.012, "single-task CNN", color=SLATE, fontsize=8
-    )
-    ax.set_xlim(alphas[0] + 0.05, alphas[-1] - 0.32)
+        ax.hlines(base, alphas[-1], alphas[0], color=colour, lw=1, ls="--", alpha=0.7)
+        ax.text(alphas[0], base + 0.008, f"single-task CNN {base:.1%}", color=colour, fontsize=8)
+    ax.set_xlim(alphas[0] + 0.05, alphas[-1] - 0.3)
+    ax.set_xticks(alphas)
     ax.set_xlabel("α (weight on classification; 1 − α on reconstruction)")
     ax.set_ylabel("out-of-distribution accuracy")
     _pct(ax)
-    first, last = s[names[0]]["ood_acc"]["mean"], s[names[-1]]["ood_acc"]["mean"]
+    acc = [s[n]["ood_acc"]["mean"] for n in names]
     ax.set_title(
-        f"AID accuracy, α = {alphas[0]:g} → {alphas[-1]:g}: {first:.1%} → {last:.1%}", fontsize=11
+        f"AID accuracy over α: {min(acc):.1%}–{max(acc):.1%};"
+        f" single-task CNN {s['cnn']['ood_acc']['mean']:.1%}",
+        fontsize=11,
     )
     # alpha = 1 trains no decoder: its reconstruction error is meaningless and left out.
     rec_alphas = [a for a in alphas if a < 1]
     mse = [s[f"hard_a{a:.1f}"]["val_recon_mse"]["mean"] for a in rec_alphas]
     ax2.plot(rec_alphas, mse, "-o", color=SLATE, ms=4, lw=2)
-    ax2.set_xlim(alphas[0] + 0.05, alphas[-1] - 0.05)
+    ax2.set_xlim(rec_alphas[0] + 0.05, rec_alphas[-1] - 0.05)
+    ax2.set_xticks(rec_alphas)
     ax2.set_xlabel("α")
     ax2.set_ylabel("validation reconstruction MSE\n(pixels in [−1, 1])")
     ax2.set_title(
@@ -213,11 +215,11 @@ def epochs(history: list[dict], out: Path) -> Path:
         ax.set_title(SHORT[name].replace("\n", " "), fontsize=10.5)
         _pct(ax)
     axes[0][0].set_ylabel("accuracy (one line per seed)")
-    ood = np.array([h["ood_acc"] for h in history if h["variant"] in panels and h["epoch"] >= 3])
-    val = np.array([h["val_acc"] for h in history if h["variant"] in panels and h["epoch"] >= 3])
+    ood = [analysis.epoch_swing(history, n, "ood_acc") * 100 for n in panels]
+    val = max(analysis.epoch_swing(history, n, "val_acc") for n in panels) * 100
     fig.suptitle(
-        f"From epoch 3 on, validation stays within {val.min():.1%}–{val.max():.1%}"
-        f" while AID accuracy ranges {ood.min():.0%}–{ood.max():.0%}",
+        f"Across epochs 3–10 of a typical run, AID accuracy spans {min(ood):.0f}–{max(ood):.0f}"
+        f" points, EuroSAT validation accuracy ≤ {val:.1f} points",
         x=0.01,
         ha="left",
         fontsize=11.5,
@@ -340,13 +342,12 @@ def effect_phrase(d: dict) -> str:
     return f"{verb} {abs(d['mean']) * 100:.1f} pp (95% CI {d['lo'] * 100:+.1f} to {d['hi'] * 100:+.1f})"
 
 
-def hero_title(summary: list[dict], comp: dict) -> str:
-    s = {line["variant"]: line for line in summary}
-    val = min(line["val_acc"]["min"] for line in summary if line["variant"] != "soft")
+def hero_title(rows: list[dict], comp: dict) -> str:
+    r = analysis.as_trained_range(rows)
     return (
-        f"All models ≥ {val:.1%} in distribution, {s['cnn']['ood_acc']['mean']:.0%}–"
-        f"{s['hard_a0.6']['ood_acc']['mean']:.0%} on aerial imagery.\n"
-        f"Reconstruction loss, architecture held fixed: {effect_phrase(comp['aux_loss'])}"
+        f"Scored as trained, every model is ≥ {r['val_min']:.1%} right on EuroSAT"
+        f" and {r['ood_lo']:.0%}–{r['ood_hi']:.0%} on AID aerial images.\n"
+        f"Hard-sharing MTL (α = 0.6) vs single-task CNN on AID: {effect_phrase(comp['mtl_vs_cnn'])}"
     )
 
 
@@ -357,7 +358,7 @@ def build_all(results: Path = RESULTS, out: Path = FIGURES) -> list[Path]:
     history = analysis.read_csv(results / "history.csv")
     score_rows = analysis.read_csv(results / "ood_scores.csv")
     paths = [
-        hero(rows, out, hero_title(analysis.summary(rows), analysis.comparisons(rows))),
+        hero(rows, out, hero_title(rows, analysis.comparisons(rows))),
         alpha_sweep(rows, out),
         per_group(rows, out),
         epochs(history, out),
