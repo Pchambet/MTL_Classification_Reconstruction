@@ -61,7 +61,7 @@ footer { margin-top: 56px; font-size: 0.85rem; color: var(--muted); overflow-wra
 <p class="lede">A course project claimed that training one encoder to classify <em>and</em> reconstruct
 satellite images makes it generalise better. Re-run over $n_seeds seeds and scored on aerial images
 from a different sensor, the claim does not hold: hard-sharing MTL lands where a single-task CNN
-already was, and the one gain that does survive comes from masking the inputs, not from reconstructing them.</p>
+already was, and the gains that do appear follow the input masking, not the reconstruction.</p>
 
 <div class="kpis">
   <div class="kpi"><b>≥ $val_min</b><span>EuroSAT validation accuracy of every model and seed, scored as trained: the in-distribution task is saturated</span></div>
